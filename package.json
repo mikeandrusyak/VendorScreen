@@ -1,0 +1,19 @@
+{
+  "name": "vendorscreen-ai",
+  "version": "1.0.0",
+  "description": "Monday.com marketplace app for automated KYC/AML vendor compliance checks",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "@mondaycom/apps-sdk": "^2.0.0",
+    "axios": "^1.7.0",
+    "dotenv": "^16.4.0",
+    "express": "^4.19.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
