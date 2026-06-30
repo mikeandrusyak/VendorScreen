@@ -6,8 +6,8 @@ const MONDAY_API_URL = 'https://api.monday.com/v2';
 // Verify these indices match your board's status column configuration
 const STATUS_INDEX = {
   Clear: 1,
-  Warning: 2,
-  Critical: 3,
+  Warning: 0,
+  Critical: 2,
 };
 
 async function updateVendorRecord(itemId, riskLevel, details, apiToken) {
