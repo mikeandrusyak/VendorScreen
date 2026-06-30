@@ -1,23 +1,23 @@
-const { mondaySdk } = require('@mondaycom/apps-sdk');
+const axios = require('axios');
 
-const monday = mondaySdk();
+const MONDAY_API_URL = 'https://api.monday.com/v2';
 
 // Maps our risk levels to Monday.com status column index values
+// Verify these indices match your board's status column configuration
 const STATUS_INDEX = {
-  'Clear': 1,
-  'Warning': 0,
-  'Critical': 2,
-  'Pending': 5
+  Clear: 1,
+  Warning: 2,
+  Critical: 3,
 };
 
-async function updateVendorRecord(itemId, riskLevel, details) {
+async function updateVendorRecord(itemId, riskLevel, details, apiToken) {
   const boardId = process.env.MONDAY_BOARD_ID;
   const columnValues = JSON.stringify({
     [process.env.COLUMN_ID_STATUS]: { index: STATUS_INDEX[riskLevel] },
     [process.env.COLUMN_ID_DETAILS]: { text: details },
   });
 
-  const mutation = `
+  const query = `
     mutation {
       change_multiple_column_values(
         board_id: ${boardId},
@@ -29,10 +29,19 @@ async function updateVendorRecord(itemId, riskLevel, details) {
     }
   `;
 
-  const response = await monday.api(mutation);
+  const response = await axios.post(
+    MONDAY_API_URL,
+    { query },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: apiToken,
+      },
+    }
+  );
 
-  if (response.errors) {
-    throw new Error(`Monday GraphQL error: ${JSON.stringify(response.errors)}`);
+  if (response.data.errors) {
+    throw new Error(`Monday GraphQL error: ${JSON.stringify(response.data.errors)}`);
   }
 
   return response.data;
