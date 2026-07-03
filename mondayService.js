@@ -37,6 +37,7 @@ async function updateVendorRecord(itemId, riskLevel, details, apiToken) {
         'Content-Type': 'application/json',
         Authorization: apiToken,
       },
+      timeout: 10000,
     }
   );
 

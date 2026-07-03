@@ -2,8 +2,12 @@ require('dotenv').config();
 
 const jwt = require('jsonwebtoken');
 const express = require('express');
+const PQueue = require('p-queue').default;
 const { checkVendorWithRetry } = require('./sanctionsService');
 const { updateVendorRecord } = require('./mondayService');
+
+// Max 3 concurrent vendor checks — prevents flooding OpenSanctions during bulk imports
+const vendorQueue = new PQueue({ concurrency: 3 });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -58,8 +62,9 @@ app.post('/webhook', async (req, res) => {
   // Respond immediately — Monday.com times out if we wait for the full check
   res.status(200).json({ status: 'received' });
 
-  // Async compliance check runs after response is sent
-  processVendor(itemId, vendorName, apiToken);
+  // Enqueue compliance check — max 3 concurrent to avoid rate limiting
+  vendorQueue.add(() => processVendor(itemId, vendorName, apiToken));
+  console.log(`[queue] size=${vendorQueue.size} pending=${vendorQueue.pending}`);
 });
 
 async function processVendor(itemId, vendorName, apiToken) {

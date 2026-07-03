@@ -13,6 +13,7 @@ async function checkVendor(vendorName) {
   const response = await axios.get(`${OPENSANCTIONS_BASE_URL}/search/default`, {
     params: { q: vendorName, limit: 5 },
     headers: { Authorization: `ApiKey ${process.env.OPENSANCTIONS_API_KEY}` },
+    timeout: 10000,
   });
 
   const results = response.data.results || [];
