@@ -37,6 +37,18 @@ function extractAuth(req) {
   }
 }
 
+// Unwraps an inboundFieldValues entry that may be a primitive or an object
+// wrapper (e.g. { columnId: "status" }). Returns the first matching key, or the
+// value itself when it's already a primitive.
+function fieldValue(field, ...keys) {
+  if (field == null) return undefined;
+  if (typeof field !== 'object') return field;
+  for (const key of keys) {
+    if (field[key] != null) return field[key];
+  }
+  return undefined;
+}
+
 // Health check — Monday Code / monitoring pings this
 app.get('/', (req, res) => res.status(200).json({ status: 'ok' }));
 
@@ -59,7 +71,15 @@ app.post('/monday/execute_action', async (req, res) => {
   // (sentence builder) infra used `inputFields`. Accept both for safety.
   const fields =
     req.body.payload?.inboundFieldValues || req.body.payload?.inputFields || {};
-  const { boardId, itemId, statusColumnId, detailsColumnId } = fields;
+
+  // Column / board / item pickers arrive wrapped in an object
+  // (e.g. { columnId: "status" }), not as a bare string. Unwrap to the id,
+  // otherwise `{ [obj]: ... }` stringifies to "[object Object]" and Monday
+  // rejects it with InvalidColumnIdException.
+  const boardId = fieldValue(fields.boardId, 'boardId', 'id', 'value');
+  const itemId = fieldValue(fields.itemId, 'itemId', 'linkedPulseId', 'id', 'value');
+  const statusColumnId = fieldValue(fields.statusColumnId, 'columnId', 'id', 'value');
+  const detailsColumnId = fieldValue(fields.detailsColumnId, 'columnId', 'id', 'value');
   // Per-account short-lived token from the JWT (dev: MONDAY_API_TOKEN)
   const apiToken = auth.shortLivedToken;
 
