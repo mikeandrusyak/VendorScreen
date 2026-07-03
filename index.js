@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const express = require('express');
 const PQueue = require('p-queue').default;
 const { checkVendorWithRetry } = require('./sanctionsService');
-const { updateVendorRecord } = require('./mondayService');
+const { updateVendorRecord, getItemName } = require('./mondayService');
 
 // Max 3 concurrent vendor checks — prevents flooding OpenSanctions during bulk imports
 const vendorQueue = new PQueue({ concurrency: 3 });
@@ -37,8 +37,15 @@ function extractAuth(req) {
   }
 }
 
-app.post('/webhook', async (req, res) => {
-  // Monday.com URL verification challenge (required during app setup)
+// Health check — Monday Code / monitoring pings this
+app.get('/', (req, res) => res.status(200).json({ status: 'ok' }));
+
+// Integration recipe action endpoint. Monday calls this when the recipe's
+// trigger fires ("When an item is created, screen it..."). The board and the
+// columns are chosen by the CLIENT in the recipe UI and arrive in
+// payload.inputFields — NOT from our .env — so it works on any client board.
+app.post('/monday/execute_action', async (req, res) => {
+  // Monday URL verification challenge (sent when the action URL is registered)
   if (req.body.challenge) {
     return res.status(200).json({ challenge: req.body.challenge });
   }
@@ -48,34 +55,50 @@ app.post('/webhook', async (req, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const { event } = req.body;
-  const itemId = event?.pulseId;
-  const vendorName = event?.pulseName;
-  // In production: shortLivedToken from JWT (5-min validity, per-account)
-  // In dev: personal MONDAY_API_TOKEN from .env
+  const inputFields = req.body.payload?.inputFields || {};
+  const { boardId, itemId, statusColumnId, detailsColumnId } = inputFields;
+  // Per-account short-lived token from the JWT (dev: MONDAY_API_TOKEN)
   const apiToken = auth.shortLivedToken;
 
-  if (!itemId || !vendorName) {
-    return res.status(400).json({ error: 'Missing itemId or vendorName in payload' });
+  if (!boardId || !itemId || !statusColumnId || !detailsColumnId) {
+    return res.status(400).json({
+      error: 'Missing required input fields (boardId, itemId, statusColumnId, detailsColumnId)',
+    });
   }
 
-  // Respond immediately — Monday.com times out if we wait for the full check
-  res.status(200).json({ status: 'received' });
+  // Respond immediately — Monday times out if we wait for the full check
+  res.status(200).json({});
 
   // Enqueue compliance check — max 3 concurrent to avoid rate limiting
-  vendorQueue.add(() => processVendor(itemId, vendorName, apiToken));
+  vendorQueue.add(() =>
+    processVendor({ boardId, itemId, statusColumnId, detailsColumnId, apiToken })
+  );
   console.log(`[queue] size=${vendorQueue.size} pending=${vendorQueue.pending}`);
 });
 
-async function processVendor(itemId, vendorName, apiToken) {
+async function processVendor({ boardId, itemId, statusColumnId, detailsColumnId, apiToken }) {
   try {
-    console.log(`[vendor] Checking: "${vendorName}" (item ${itemId})`);
+    const vendorName = await getItemName(itemId, apiToken);
+    if (!vendorName) {
+      console.error(`[vendor] Could not resolve name for item ${itemId} — skipping`);
+      return;
+    }
+
+    console.log(`[vendor] Checking: "${vendorName}" (item ${itemId}, board ${boardId})`);
 
     const { riskLevel, details } = await checkVendorWithRetry(vendorName);
 
     console.log(`[vendor] Result for "${vendorName}": ${riskLevel}`);
 
-    await updateVendorRecord(itemId, riskLevel, details, apiToken);
+    await updateVendorRecord({
+      boardId,
+      itemId,
+      statusColumnId,
+      detailsColumnId,
+      riskLevel,
+      details,
+      apiToken,
+    });
 
     console.log(`[vendor] Monday.com updated for item ${itemId}`);
   } catch (err) {
