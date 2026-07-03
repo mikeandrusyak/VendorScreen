@@ -2,6 +2,8 @@
 
 Automated KYC/AML compliance checks for new vendors on Monday.com boards. When a new item is created, it queries the OpenSanctions API and updates the board with a risk level: **Clear**, **Warning**, or **Critical**.
 
+> ⚠️ **Informational tool only.** VendorScreen AI provides indicative screening signals and **does not make compliance decisions**. Results may be incomplete or inaccurate and must be independently verified. Responsibility for regulatory compliance rests with the customer. See [Terms of Service](./TERMS_OF_SERVICE.md) and [Privacy Policy](./PRIVACY_POLICY.md).
+
 ## Local Development
 
 ### 1. Install dependencies

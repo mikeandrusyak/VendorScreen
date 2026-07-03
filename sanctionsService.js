@@ -9,6 +9,17 @@ const RISK_LEVEL = {
   CRITICAL: 'Critical',
 };
 
+// Appended to every details string written to the board. VendorScreen AI is an
+// informational screening tool — it does not make compliance decisions. See
+// TERMS_OF_SERVICE.md §2. This disclaimer must remain visible in the output.
+const DISCLAIMER =
+  ' — Informational screening only, not a compliance decision. Results may be ' +
+  'incomplete or inaccurate; verify independently before acting.';
+
+function withDisclaimer(details) {
+  return `${details}${DISCLAIMER}`;
+}
+
 async function checkVendor(vendorName) {
   const response = await axios.get(`${OPENSANCTIONS_BASE_URL}/search/default`, {
     params: { q: vendorName, limit: 5 },
@@ -19,7 +30,10 @@ async function checkVendor(vendorName) {
   const results = response.data.results || [];
 
   if (results.length === 0) {
-    return { riskLevel: RISK_LEVEL.CLEAR, details: 'No matches found in OpenSanctions.' };
+    return {
+      riskLevel: RISK_LEVEL.CLEAR,
+      details: withDisclaimer('No matches found in OpenSanctions.'),
+    };
   }
 
   // Check for active sanctions first (Critical), then PEP/minor flags (Warning)
@@ -32,7 +46,7 @@ async function checkVendor(vendorName) {
     const profileUrl = `https://www.opensanctions.org/entities/${match.id}/`;
     return {
       riskLevel: RISK_LEVEL.CRITICAL,
-      details: `Direct sanction match: ${match.caption}. Profile: ${profileUrl}`,
+      details: withDisclaimer(`Possible direct sanction match: ${match.caption}. Profile: ${profileUrl}`),
     };
   }
 
@@ -50,13 +64,13 @@ async function checkVendor(vendorName) {
     const profileUrl = `https://www.opensanctions.org/entities/${match.id}/`;
     return {
       riskLevel: RISK_LEVEL.WARNING,
-      details: `PEP or minor flag detected: ${match.caption}. Profile: ${profileUrl}`,
+      details: withDisclaimer(`Possible PEP or minor flag: ${match.caption}. Profile: ${profileUrl}`),
     };
   }
 
   return {
     riskLevel: RISK_LEVEL.CLEAR,
-    details: `No active sanctions or PEP flags. Possible non-critical match: ${results[0].caption}.`,
+    details: withDisclaimer(`No active sanctions or PEP flags. Possible non-critical match: ${results[0].caption}.`),
   };
 }
 
