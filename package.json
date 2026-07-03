@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Monday.com marketplace app for automated KYC/AML vendor compliance checks",
   "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js"
