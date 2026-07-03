@@ -40,10 +40,10 @@ function extractAuth(req) {
 // Health check — Monday Code / monitoring pings this
 app.get('/', (req, res) => res.status(200).json({ status: 'ok' }));
 
-// Integration recipe action endpoint. Monday calls this when the recipe's
+// Automation Block action endpoint. Monday calls this when the automation's
 // trigger fires ("When an item is created, screen it..."). The board and the
-// columns are chosen by the CLIENT in the recipe UI and arrive in
-// payload.inputFields — NOT from our .env — so it works on any client board.
+// columns are chosen by the CLIENT in the automation UI and arrive in the
+// payload — NOT from our .env — so it works on any client board.
 app.post('/monday/execute_action', async (req, res) => {
   // Monday URL verification challenge (sent when the action URL is registered)
   if (req.body.challenge) {
@@ -55,8 +55,11 @@ app.post('/monday/execute_action', async (req, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const inputFields = req.body.payload?.inputFields || {};
-  const { boardId, itemId, statusColumnId, detailsColumnId } = inputFields;
+  // New monday workflows infra sends `inboundFieldValues`; the older recipe
+  // (sentence builder) infra used `inputFields`. Accept both for safety.
+  const fields =
+    req.body.payload?.inboundFieldValues || req.body.payload?.inputFields || {};
+  const { boardId, itemId, statusColumnId, detailsColumnId } = fields;
   // Per-account short-lived token from the JWT (dev: MONDAY_API_TOKEN)
   const apiToken = auth.shortLivedToken;
 

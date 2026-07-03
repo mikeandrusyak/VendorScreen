@@ -13,8 +13,8 @@ Recipe trigger: "When an item is created"
   └── Monday POSTs to /monday/execute_action
         ├── Challenge handshake (action URL registration only)
         ├── JWT verification via MONDAY_SIGNING_SECRET (production)
-        ├── reads payload.inputFields → boardId, itemId, statusColumnId, detailsColumnId
-        │     (chosen by the CUSTOMER in the recipe UI — NOT from .env)
+        ├── reads payload.inboundFieldValues → boardId, itemId, statusColumnId, detailsColumnId
+        │     (chosen by the CUSTOMER in the automation UI — NOT from .env)
         ├── 200 OK returned immediately
         └── async processVendor()
               ├── mondayService.getItemName(itemId)   → vendor name
