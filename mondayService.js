@@ -47,7 +47,7 @@ async function updateVendorRecord({
 }) {
   const columnValues = JSON.stringify({
     [statusColumnId]: { label: riskLevel },
-    [detailsColumnId]: { text: details },
+    [detailsColumnId]: details,
   });
 
   const query = `
