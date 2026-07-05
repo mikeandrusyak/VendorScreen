@@ -16,11 +16,11 @@ Recipe trigger: "When an item is created"
         ├── reads payload.inboundFieldValues → boardId, itemId, statusColumnId, detailsColumnId
         │     (chosen by the CUSTOMER in the automation UI — NOT from .env)
         ├── 200 OK returned immediately
-        └── async processVendor()
-              ├── mondayService.getItemName(itemId)   → vendor name
-              ├── sanctionsService: GET /search/default?q=<name>
+        └── async process_vendor()
+              ├── monday_service.get_item_name(item_id)   → vendor name
+              ├── sanctions_service: GET /search/default?q=<name>
               │     └── maps result → Clear / Warning / Critical
-              └── mondayService.updateVendorRecord()
+              └── monday_service.update_vendor_record()
                     └── writes status by LABEL (create_labels_if_missing) + details text
 ```
 
@@ -36,7 +36,7 @@ Only **secrets** live in the environment. Board and column IDs come from the rec
 |---|---|---|
 | `MONDAY_SIGNING_SECRET` | Monday Code + local | JWT verification for recipe action requests (Developer Center → App credentials → signing_secret) |
 | `OPENSANCTIONS_API_KEY` | Monday Code + local | OpenSanctions authentication |
-| `NODE_ENV` | Monday Code + local | `production` in deploy, `development` locally |
+| `APP_ENV` | Monday Code + local | `production` in deploy, `development` locally (`NODE_ENV` is still honored for backwards compatibility) |
 | `MONDAY_API_TOKEN` | **local dev only** | Personal API token used only when no `Authorization` header is present (dev mode). Not needed in production — the token comes from the JWT. |
 | `PORT` | auto | Provided by Monday Code; defaults to `3000` locally |
 
@@ -48,7 +48,9 @@ Only **secrets** live in the environment. Board and column IDs come from the rec
 
 ### 1. Install dependencies
 ```bash
-npm install
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
 ### 2. Configure environment variables
@@ -56,7 +58,7 @@ Set the variables above in a local `.env`.
 
 ### 3. Start the server
 ```bash
-npm start   # port 3000
+python main.py   # port 3000
 ```
 Health check: `GET /` returns `{ "status": "ok" }`.
 
@@ -64,13 +66,13 @@ Health check: `GET /` returns `{ "status": "ok" }`.
 ```bash
 ngrok http 3000
 ```
-Use the generated HTTPS URL + `/monday/execute_action` as the action URL while testing the recipe in Developer Center. In dev mode (`NODE_ENV=development`) requests without an `Authorization` header fall back to `MONDAY_API_TOKEN`.
+Use the generated HTTPS URL + `/monday/execute_action` as the action URL while testing the recipe in Developer Center. In dev mode (`APP_ENV=development`) requests without an `Authorization` header fall back to `MONDAY_API_TOKEN`.
 
 ---
 
 ## Recipe configuration (Developer Center)
 
-The code does nothing until the integration recipe is configured. Field names below **must match** those read in `index.js` (`boardId`, `itemId`, `statusColumnId`, `detailsColumnId`).
+The code does nothing until the integration recipe is configured. Field names below **must match** those read in `main.py` (`boardId`, `itemId`, `statusColumnId`, `detailsColumnId`).
 
 1. **Create App → Add Feature → Integration.**
 2. **Trigger:** built-in *"When an item is created"* (Monday manages the subscription and supplies `boardId` + `itemId`).
@@ -96,7 +98,7 @@ mapps init   # requires App ID from Developer Center
 ### Set environment variables in Monday Code
 Monday Code does NOT read your local `.env` — set each secret once:
 ```bash
-mapps code:env --mode set --key NODE_ENV --value production
+mapps code:env --mode set --key APP_ENV --value production
 mapps code:env --mode set --key MONDAY_SIGNING_SECRET --value <value>
 mapps code:env --mode set --key OPENSANCTIONS_API_KEY --value <value>
 ```
@@ -111,6 +113,7 @@ mapps code:env --mode list
 ```bash
 mapps code:push
 ```
+> Monday Code's default managed runtime targets Node.js. For this Python app, deploy as a container (a simple `Dockerfile` running `python main.py`) — check the current Monday Code docs for container deployment support on your plan.
 
 After deploy, set the recipe **Action URL** in Developer Center to the new `*.monday.app` URL + `/monday/execute_action`.
 
