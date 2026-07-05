@@ -113,7 +113,7 @@ mapps code:env --mode list
 ```bash
 mapps code:push
 ```
-> Monday Code's default managed runtime targets Node.js. For this Python app, deploy as a container (a simple `Dockerfile` running `python main.py`) — check the current Monday Code docs for container deployment support on your plan.
+> Monday Code supports Python natively — no Dockerfile needed. The build detects the runtime from `requirements.txt` and starts the app with the `web:` command in [`Procfile`](./Procfile) (same layout as monday's official [quickstart-python-fastapi](https://github.com/mondaycom/monday-code-quickstarts/tree/master/quickstart-python-fastapi)).
 
 After deploy, set the recipe **Action URL** in Developer Center to the new `*.monday.app` URL + `/monday/execute_action`.
 
