@@ -38,6 +38,7 @@ Only **secrets** live in the environment. Board and column IDs come from the rec
 | `OPENSANCTIONS_API_KEY` | Monday Code + local | OpenSanctions authentication |
 | `NODE_ENV` | Monday Code + local | `production` in deploy, `development` locally |
 | `MONDAY_API_TOKEN` | **local dev only** | Personal API token used only when no `Authorization` header is present (dev mode). Not needed in production — the token comes from the JWT. |
+| `MONTHLY_CHECK_LIMIT` | Monday Code + local | Soft per-account cap on paid OpenSanctions checks per calendar month. Defaults to `100`. Once hit, the board is updated with a `Limit Reached` status instead of calling OpenSanctions. Not yet tied to Monday's native billing tiers — see TECH_SPEC.md. |
 | `PORT` | auto | Provided by Monday Code; defaults to `3000` locally |
 
 > The old single-tenant variables (`MONDAY_BOARD_ID`, `COLUMN_ID_STATUS`, `COLUMN_ID_DETAILS`, `COLUMN_ID_COUNTRY`) are **no longer used** — the app reads these from the recipe input fields.

@@ -5,6 +5,7 @@ const express = require('express');
 const PQueue = require('p-queue').default;
 const { checkVendorWithRetry } = require('./sanctionsService');
 const { updateVendorRecord, getItemName } = require('./mondayService');
+const { reserveUsageSlot } = require('./usageService');
 
 // Max 3 concurrent vendor checks — prevents flooding OpenSanctions during bulk imports
 const vendorQueue = new PQueue({ concurrency: 3 });
@@ -107,7 +108,26 @@ async function processVendor({ boardId, itemId, statusColumnId, detailsColumnId,
       return;
     }
 
-    console.log(`[vendor] Checking: "${vendorName}" (item ${itemId}, board ${boardId})`);
+    const usage = await reserveUsageSlot(apiToken);
+    if (!usage.allowed) {
+      console.warn(
+        `[usage] Monthly limit (${usage.limit}) reached — skipping paid check for "${vendorName}" (item ${itemId})`
+      );
+      await updateVendorRecord({
+        boardId,
+        itemId,
+        statusColumnId,
+        detailsColumnId,
+        riskLevel: 'Limit Reached',
+        details: `Monthly screening limit of ${usage.limit} checks reached for this account. Upgrade your plan or contact support to continue screening.`,
+        apiToken,
+      });
+      return;
+    }
+
+    console.log(
+      `[vendor] Checking: "${vendorName}" (item ${itemId}, board ${boardId}) — usage ${usage.count}/${usage.limit}`
+    );
 
     const { riskLevel, details } = await checkVendorWithRetry(vendorName);
 

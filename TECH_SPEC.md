@@ -34,7 +34,10 @@ The API response from OpenSanctions must be mapped to the Monday.com Status colu
 
 The details of the findings (or links to the OpenSanctions profile) must be written to the `COLUMN_ID_DETAILS` text column.
 
-## 6. AI Agent Coding Guidelines (CRITICAL)
+## 6a. Usage limiting
+To avoid unbounded OpenSanctions spend before per-plan billing exists, every check consumes one slot from a per-account monthly counter stored via `@mondaycom/apps-sdk` `Storage` (keyed by the account's API token, so each customer has an independent counter that Monday scopes for us). The cap is `MONTHLY_CHECK_LIMIT` (default 100). When the cap is hit, the app skips the OpenSanctions call and writes a `Limit Reached` status + explanatory note instead. This is a stopgap, not the final billing enforcement — once native Monday subscriptions/tiers are wired up (Etap 4 of the launch plan), the limit should be read per-plan rather than from a single env var.
+
+## 6b. AI Agent Coding Guidelines (CRITICAL)
 - **Monday Challenge:** The `/webhook` endpoint MUST handle Monday's initial URL verification challenge. If `req.body.challenge` exists, return it as `{ "challenge": req.body.challenge }`.
 - **Security:** Always verify the Monday webhook signature using `MONDAY_SIGNING_SECRET`.
 - **Error Handling:** Wrap API calls in `try/catch`. Implement basic handling for `429 Too Many Requests` from OpenSanctions.
