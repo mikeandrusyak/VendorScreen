@@ -46,11 +46,14 @@ Only **secrets** live in the environment. Board and column IDs come from the rec
 
 ## Local development
 
+The app code lives in [`src/`](./src) (that folder is what gets deployed). Dev
+tooling (tests, CI) stays in the repo root.
+
 ### 1. Install dependencies
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # app deps + test/lint tools
 ```
 
 ### 2. Configure environment variables
@@ -58,7 +61,7 @@ Set the variables above in a local `.env`.
 
 ### 3. Start the server
 ```bash
-python main.py   # port 3000
+python src/main.py   # port 3000
 ```
 Health check: `GET /` returns `{ "status": "ok" }`.
 
@@ -113,7 +116,7 @@ mapps code:env --mode list
 ```bash
 mapps code:push
 ```
-> Monday Code supports Python natively — no Dockerfile needed. The build detects the runtime from `requirements.txt` and starts the app with the `web:` command in [`Procfile`](./Procfile) (same layout as monday's official [quickstart-python-fastapi](https://github.com/mondaycom/monday-code-quickstarts/tree/master/quickstart-python-fastapi)).
+> Monday Code supports Python natively — no Dockerfile needed. The build detects the runtime from `requirements.txt` and starts the app with the `web:` command in [`Procfile`](./src/Procfile) (same layout as monday's official [quickstart-python-fastapi](https://github.com/mondaycom/monday-code-quickstarts/tree/master/quickstart-python-fastapi)).
 
 After deploy, set the recipe **Action URL** in Developer Center to the new `*.monday.app` URL + `/monday/execute_action`.
 

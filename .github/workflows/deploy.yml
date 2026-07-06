@@ -77,9 +77,11 @@ jobs:
         id: deploy
         run: |
           set +e
-          # No -z/region flag: this app rejects it ("Region parameter is not
-          # allowed for this app") — the CLI resolves the region itself.
-          OUTPUT=$(mapps code:push -a "$APP_ID" 2>&1)
+          # -d src: only the app code in src/ is deployed (Procfile and
+          # requirements.txt live there too). No -z/region flag: this app
+          # rejects it ("Region parameter is not allowed for this app") — the
+          # CLI resolves the region itself.
+          OUTPUT=$(mapps code:push -a "$APP_ID" -d src 2>&1)
           STATUS=$?
           echo "$OUTPUT"
           if [ $STATUS -ne 0 ]; then

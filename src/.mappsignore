@@ -1,0 +1,5 @@
+# The deploy bundle is this src/ directory (mapps code:push -d src), so it only
+# ever contains app files. We just keep Python bytecode caches out of it — the
+# CLI does not exclude __pycache__ automatically.
+__pycache__/
+*.pyc
