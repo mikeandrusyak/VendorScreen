@@ -38,11 +38,6 @@ jobs:
       app_url: ${{ steps.deploy.outputs.app_url }}
     env:
       APP_ID: ${{ vars.MONDAY_APP_ID }}
-      # monday-code hosts this app in the `us` region — the live service URL is
-      # https://live1-service-...-.us.monday.app (the account's euc1 data region
-      # is unrelated). Override with a MONDAY_REGION repo variable if it moves
-      # (us|eu|au|il).
-      REGION: ${{ vars.MONDAY_REGION || 'us' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -82,7 +77,9 @@ jobs:
         id: deploy
         run: |
           set +e
-          OUTPUT=$(mapps code:push -a "$APP_ID" -z "$REGION" 2>&1)
+          # No -z/region flag: this app rejects it ("Region parameter is not
+          # allowed for this app") — the CLI resolves the region itself.
+          OUTPUT=$(mapps code:push -a "$APP_ID" 2>&1)
           STATUS=$?
           echo "$OUTPUT"
           if [ $STATUS -ne 0 ]; then
@@ -90,7 +87,7 @@ jobs:
             if echo "$OUTPUT" | grep -qi "draft"; then
               echo "Likely cause: no draft version exists. Create a new version in the monday Developer Center (it starts as a draft), then re-run."
             else
-              echo "Check that MONDAY_TOKEN is valid and not expired, MONDAY_APP_ID ($APP_ID) is correct, and the region ($REGION) matches your app."
+              echo "Check that MONDAY_TOKEN is valid and not expired and MONDAY_APP_ID ($APP_ID) is correct."
             fi
             exit 1
           fi
