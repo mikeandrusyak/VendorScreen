@@ -1,0 +1,17 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/F = pyflakes+pycodestyle, I = isort, UP = pyupgrade, B = bugbear
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# main.py must call load_dotenv() before importing modules that read env at
+# import time, so imports are intentionally not all at the top (E402).
+"main.py" = ["E402"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]

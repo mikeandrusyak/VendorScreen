@@ -1,0 +1,144 @@
+name: Deploy to monday code
+
+on:
+  push:
+    branches: [main]
+
+# Prevent overlapping deploys if commits land in quick succession.
+concurrency:
+  group: deploy-monday
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Tests (pytest)
+        run: pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      app_url: ${{ steps.deploy.outputs.app_url }}
+    env:
+      APP_ID: ${{ vars.MONDAY_APP_ID }}
+      # monday-code hosts this app in the `us` region — the live service URL is
+      # https://live1-service-...-.us.monday.app (the account's euc1 data region
+      # is unrelated). Override with a MONDAY_REGION repo variable if it moves
+      # (us|eu|au|il).
+      REGION: ${{ vars.MONDAY_REGION || 'us' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install monday apps CLI
+        run: npm install -g @mondaycom/apps-cli
+
+      # The CLI reads its token from a local .mappsrc file (no env-var support),
+      # so we generate one from the MONDAY_TOKEN secret before any command.
+      - name: Authenticate monday CLI
+        run: mapps init -t "$MONDAY_TOKEN" -l
+        env:
+          MONDAY_TOKEN: ${{ secrets.MONDAY_TOKEN }}
+
+      # monday deploys code into the app's latest DRAFT version. After a version
+      # is promoted to live, no draft remains and there is nothing to deploy
+      # into. Detect that up front and fail with an actionable message instead
+      # of the CLI's opaque error. (The CLI has no --json output, so we match
+      # the human-readable list; the deploy step below is the reliable backstop.)
+      - name: Check that a draft version exists
+        run: |
+          set +e
+          VERSIONS=$(mapps app-version:list -i "$APP_ID" 2>&1)
+          STATUS=$?
+          echo "$VERSIONS"
+          if [ $STATUS -eq 0 ] && ! echo "$VERSIONS" | grep -qi "draft"; then
+            echo "::error title=No draft version::This app has no draft version to deploy into."
+            echo "monday code always deploys into the latest DRAFT version. Once a version is promoted to live, no draft is left, so the deploy has nowhere to go."
+            echo "Fix: open the monday Developer Center -> your app -> Versions -> 'Create new version' (it starts as a draft), then re-run this workflow."
+            exit 1
+          fi
+
+      - name: Deploy to the latest draft version
+        id: deploy
+        run: |
+          set +e
+          OUTPUT=$(mapps code:push -a "$APP_ID" -z "$REGION" 2>&1)
+          STATUS=$?
+          echo "$OUTPUT"
+          if [ $STATUS -ne 0 ]; then
+            echo "::error title=Deploy failed::Pushing code to monday failed."
+            if echo "$OUTPUT" | grep -qi "draft"; then
+              echo "Likely cause: no draft version exists. Create a new version in the monday Developer Center (it starts as a draft), then re-run."
+            else
+              echo "Check that MONDAY_TOKEN is valid and not expired, MONDAY_APP_ID ($APP_ID) is correct, and the region ($REGION) matches your app."
+            fi
+            exit 1
+          fi
+          echo "Deployed successfully to the latest draft version."
+          # code:push prints the deployment URL on success. Extract it so the
+          # smoke job can hit the running draft. If the log format ever changes
+          # and this misses, set STAGING_APP_URL to point at the draft manually.
+          URL=$(printf '%s' "$OUTPUT" | grep -oE 'https://[a-zA-Z0-9._-]+\.monday\.app[^[:space:]]*' | head -1)
+          URL=${URL:-${{ vars.STAGING_APP_URL }}}
+          if [ -z "$URL" ]; then
+            echo "::warning::Could not determine the deployed URL from the deploy log; smoke test will be skipped. Set a STAGING_APP_URL repo variable to enable it."
+          else
+            echo "Deployed draft is at: $URL"
+          fi
+          echo "app_url=$URL" >> "$GITHUB_OUTPUT"
+
+  # Runs against the ALREADY-DEPLOYED draft, before you promote it to live.
+  smoke:
+    needs: deploy
+    if: needs.deploy.outputs.app_url != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install smoke-test deps
+        run: pip install httpx PyJWT
+
+      # Cheap check: the service booted, secrets loaded, /health answers.
+      - name: Health check
+        run: |
+          curl -fsS "${{ needs.deploy.outputs.app_url }}/health" | grep -q '"status":"ok"'
+          echo "Health OK"
+
+      # Full flow: create item -> call action endpoint -> assert the board was
+      # updated. Only runs if a test board is configured (E2E_BOARD_ID set).
+      - name: End-to-end (create item, screen, verify)
+        if: vars.E2E_BOARD_ID != ''
+        env:
+          APP_URL: ${{ needs.deploy.outputs.app_url }}
+          MONDAY_SIGNING_SECRET: ${{ secrets.MONDAY_SIGNING_SECRET }}
+          E2E_MONDAY_TOKEN: ${{ secrets.E2E_MONDAY_TOKEN }}
+          E2E_BOARD_ID: ${{ vars.E2E_BOARD_ID }}
+          E2E_STATUS_COLUMN: ${{ vars.E2E_STATUS_COLUMN }}
+          E2E_DETAILS_COLUMN: ${{ vars.E2E_DETAILS_COLUMN }}
+          E2E_VENDOR_NAME: ${{ vars.E2E_VENDOR_NAME }}
+        run: python scripts/e2e_smoke.py
