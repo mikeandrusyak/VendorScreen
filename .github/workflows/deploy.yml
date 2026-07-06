@@ -34,11 +34,15 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
+    outputs:
+      app_url: ${{ steps.deploy.outputs.app_url }}
     env:
       APP_ID: ${{ vars.MONDAY_APP_ID }}
-      # App lives in the euc1 region (see .mappsrc token). Override with a
-      # MONDAY_REGION repo variable if the app is moved (us|eu|au|il).
-      REGION: ${{ vars.MONDAY_REGION || 'eu' }}
+      # monday-code hosts this app in the `us` region — the live service URL is
+      # https://live1-service-...-.us.monday.app (the account's euc1 data region
+      # is unrelated). Override with a MONDAY_REGION repo variable if it moves
+      # (us|eu|au|il).
+      REGION: ${{ vars.MONDAY_REGION || 'us' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -75,6 +79,7 @@ jobs:
           fi
 
       - name: Deploy to the latest draft version
+        id: deploy
         run: |
           set +e
           OUTPUT=$(mapps code:push -a "$APP_ID" -z "$REGION" 2>&1)
@@ -89,4 +94,51 @@ jobs:
             fi
             exit 1
           fi
-          echo "Deployed successfully to the latest draft version. Promote it to live in the monday Developer Center when ready."
+          echo "Deployed successfully to the latest draft version."
+          # code:push prints the deployment URL on success. Extract it so the
+          # smoke job can hit the running draft. If the log format ever changes
+          # and this misses, set STAGING_APP_URL to point at the draft manually.
+          URL=$(printf '%s' "$OUTPUT" | grep -oE 'https://[a-zA-Z0-9._-]+\.monday\.app[^[:space:]]*' | head -1)
+          URL=${URL:-${{ vars.STAGING_APP_URL }}}
+          if [ -z "$URL" ]; then
+            echo "::warning::Could not determine the deployed URL from the deploy log; smoke test will be skipped. Set a STAGING_APP_URL repo variable to enable it."
+          else
+            echo "Deployed draft is at: $URL"
+          fi
+          echo "app_url=$URL" >> "$GITHUB_OUTPUT"
+
+  # Runs against the ALREADY-DEPLOYED draft, before you promote it to live.
+  smoke:
+    needs: deploy
+    if: needs.deploy.outputs.app_url != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install smoke-test deps
+        run: pip install httpx PyJWT
+
+      # Cheap check: the service booted, secrets loaded, /health answers.
+      - name: Health check
+        run: |
+          curl -fsS "${{ needs.deploy.outputs.app_url }}/health" | grep -q '"status":"ok"'
+          echo "Health OK"
+
+      # Full flow: create item -> call action endpoint -> assert the board was
+      # updated. Only runs if a test board is configured (E2E_BOARD_ID set).
+      - name: End-to-end (create item, screen, verify)
+        if: vars.E2E_BOARD_ID != ''
+        env:
+          APP_URL: ${{ needs.deploy.outputs.app_url }}
+          MONDAY_SIGNING_SECRET: ${{ secrets.MONDAY_SIGNING_SECRET }}
+          E2E_MONDAY_TOKEN: ${{ secrets.E2E_MONDAY_TOKEN }}
+          E2E_BOARD_ID: ${{ vars.E2E_BOARD_ID }}
+          E2E_STATUS_COLUMN: ${{ vars.E2E_STATUS_COLUMN }}
+          E2E_DETAILS_COLUMN: ${{ vars.E2E_DETAILS_COLUMN }}
+          E2E_VENDOR_NAME: ${{ vars.E2E_VENDOR_NAME }}
+        run: python scripts/e2e_smoke.py
