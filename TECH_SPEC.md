@@ -1,15 +1,15 @@
 # VendorScreen AI - Technical Specification
 
 ## 1. Project Overview
-VendorScreen AI is a Node.js-based integration backend for a Monday.com marketplace application. 
+VendorScreen AI is a Python-based integration backend for a Monday.com marketplace application. 
 **Target Audience:** B2B sectors with high contractor turnover but without heavy ERPs (e.g., waste management IT, logistics, construction, distribution).
 **Core Value:** Automates KYC/AML compliance checks for new vendors against sanction lists and PEP (Politically Exposed Persons) databases using the OpenSanctions API.
 
 ## 2. Tech Stack
-- **Runtime:** Node.js
-- **Framework:** Express.js
-- **Integrations:** @mondaycom/apps-sdk, OpenSanctions API (via Axios)
-- **Environment Management:** dotenv
+- **Runtime:** Python 3.10+
+- **Framework:** FastAPI (served by Uvicorn)
+- **Integrations:** Monday.com GraphQL API, OpenSanctions API (via httpx)
+- **Environment Management:** python-dotenv
 
 ## 3. Environment Variables (Pre-configured)
 - `MONDAY_SIGNING_SECRET`: Used to verify webhook payloads.
@@ -18,13 +18,13 @@ VendorScreen AI is a Node.js-based integration backend for a Monday.com marketpl
 
 ## 4. Architecture & Data Flow
 1. **Trigger:** A new item (vendor) is created on the Monday.com board. Monday sends a POST request to our `/webhook` endpoint.
-2. **Immediate Acknowledgment:** The Express server MUST immediately return a `200 OK` response to Monday.com to prevent webhook timeouts.
+2. **Immediate Acknowledgment:** The server MUST immediately return a `200 OK` response to Monday.com to prevent webhook timeouts.
 3. **Verification Process (Asynchronous):**
    - Extract the Item ID and Vendor Name from the webhook payload.
    - Send a GET request to the OpenSanctions API to check the Vendor Name.
 4. **Update Process:**
    - Based on the OpenSanctions response, determine the risk level.
-   - Use the `@mondaycom/apps-sdk` to execute a GraphQL mutation (`change_multiple_column_values`) to update the Monday.com item.
+   - Execute a GraphQL mutation (`change_multiple_column_values`) against the Monday.com API to update the item.
 
 ## 5. Business Logic & Status Mapping
 The API response from OpenSanctions must be mapped to the Monday.com Status column (`COLUMN_ID_STATUS`):
