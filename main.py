@@ -46,7 +46,15 @@ def extract_auth(request: Request):
 
     token = auth_header.replace("Bearer ", "")
     try:
-        return jwt.decode(token, os.getenv("MONDAY_SIGNING_SECRET"), algorithms=["HS256"])
+        # Monday's JWT carries an `aud` claim; the Node `jsonwebtoken` library
+        # ignored it by default, but PyJWT rejects the token unless audience
+        # verification is explicitly disabled.
+        return jwt.decode(
+            token,
+            os.getenv("MONDAY_SIGNING_SECRET"),
+            algorithms=["HS256"],
+            options={"verify_aud": False},
+        )
     except jwt.PyJWTError as err:
         log.error("[auth] JWT verification failed: %s", err)
         return None
@@ -66,8 +74,10 @@ def field_value(field, *keys):
     return None
 
 
-# Health check — Monday Code / monitoring pings this
-@app.get("/")
+# Health check — Monday Code pings HEAD /health; keep / for manual checks.
+# FastAPI does not auto-serve HEAD for GET routes, so register both methods.
+@app.api_route("/", methods=["GET", "HEAD"])
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     return {"status": "ok"}
 
