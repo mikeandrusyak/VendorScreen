@@ -121,7 +121,10 @@ async def execute_action(request: Request):
         return JSONResponse(
             status_code=400,
             content={
-                "error": "Missing required input fields (boardId, itemId, statusColumnId, detailsColumnId)"
+                "error": (
+                    "Missing required input fields "
+                    "(boardId, itemId, statusColumnId, detailsColumnId)"
+                )
             },
         )
 

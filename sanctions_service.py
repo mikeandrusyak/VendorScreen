@@ -79,7 +79,8 @@ async def check_vendor(vendor_name):
     return {
         "riskLevel": RISK_LEVEL["CLEAR"],
         "details": with_disclaimer(
-            f"No active sanctions or PEP flags. Possible non-critical match: {results[0].get('caption')}."
+            "No active sanctions or PEP flags. "
+            f"Possible non-critical match: {results[0].get('caption')}."
         ),
     }
 

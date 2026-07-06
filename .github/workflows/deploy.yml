@@ -1,0 +1,48 @@
+name: Deploy to monday code
+
+on:
+  push:
+    branches: [main]
+
+# Prevent overlapping deploys if commits land in quick succession.
+concurrency:
+  group: deploy-monday
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Tests (pytest)
+        run: pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Deploys the code into the app's latest DRAFT version (equivalent to
+      # `mapps code:push`). Live customers stay on the live version until the
+      # draft is promoted in the monday Developer Center. A draft version must
+      # exist, or this step fails — create a new draft after each promotion.
+      - name: Deploy to monday code
+        uses: mondaycom/monday-app-deploy-action@master
+        with:
+          token: ${{ secrets.MONDAY_TOKEN }}
+          appId: ${{ vars.MONDAY_APP_ID }}
