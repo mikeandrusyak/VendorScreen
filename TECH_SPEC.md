@@ -1,7 +1,7 @@
-# VendorScreen AI - Technical Specification
+# VendorScreen - Technical Specification
 
 ## 1. Project Overview
-VendorScreen AI is a Python-based integration backend for a Monday.com marketplace application. 
+VendorScreen is a Python-based integration backend for a Monday.com marketplace application. 
 **Target Audience:** B2B sectors with high contractor turnover but without heavy ERPs (e.g., waste management IT, logistics, construction, distribution).
 **Core Value:** Automates KYC/AML compliance checks for new vendors against sanction lists and PEP (Politically Exposed Persons) databases using the OpenSanctions API.
 

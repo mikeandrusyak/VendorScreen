@@ -15,7 +15,7 @@ RISK_LEVEL = {
     "CRITICAL": "Critical",
 }
 
-# Appended to every details string written to the board. VendorScreen AI is an
+# Appended to every details string written to the board. VendorScreen is an
 # informational screening tool — it does not make compliance decisions. See
 # TERMS_OF_SERVICE.md §2. This disclaimer must remain visible in the output.
 DISCLAIMER = (
