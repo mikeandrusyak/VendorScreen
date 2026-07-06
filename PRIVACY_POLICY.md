@@ -1,9 +1,9 @@
-# Privacy Policy — VendorScreen AI
+# Privacy Policy — VendorScreen
 
 **Effective date:** 2026-07-03
 **Last updated:** 2026-07-03
 
-This Privacy Policy explains how the **VendorScreen AI** application ("**Application**"), operated by `Andrusiak Mykhailo`, an independent individual developer ("**we**", "**us**"), processes data when installed on a monday.com account. The Application is a business-to-business tool. In most cases the Customer (the organization installing the Application) is the **data controller** and we act as a **data processor** on the Customer's behalf.
+This Privacy Policy explains how the **VendorScreen** application ("**Application**"), operated by `Andrusiak Mykhailo`, an independent individual developer ("**we**", "**us**"), processes data when installed on a monday.com account. The Application is a business-to-business tool. In most cases the Customer (the organization installing the Application) is the **data controller** and we act as a **data processor** on the Customer's behalf.
 
 ---
 

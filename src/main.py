@@ -171,5 +171,5 @@ async def process_vendor(board_id, item_id, status_column_id, details_column_id,
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "3000"))
-    log.info("VendorScreen AI listening on port %d", port)
+    log.info("VendorScreen listening on port %d", port)
     uvicorn.run(app, host="0.0.0.0", port=port)

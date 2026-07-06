@@ -1,9 +1,9 @@
-# Terms of Service — VendorScreen AI
+# Terms of Service — VendorScreen
 
 **Effective date:** 2026-07-03
 **Last updated:** 2026-07-03
 
-These Terms of Service ("**Terms**") govern access to and use of the **VendorScreen AI** application ("**Application**", "**Service**") distributed through the monday.com marketplace and operated by `Andrusiak Mykhailo`, an independent individual developer ("**Provider**", "**we**", "**us**"). The Application is intended solely for use by businesses and their authorized representatives ("**Customer**", "**you**"). By installing, accessing, or using the Application, you agree to these Terms on behalf of the organization you represent. If you do not have authority to bind that organization, or you do not agree, do not use the Application.
+These Terms of Service ("**Terms**") govern access to and use of the **VendorScreen** application ("**Application**", "**Service**") distributed through the monday.com marketplace and operated by `Andrusiak Mykhailo`, an independent individual developer ("**Provider**", "**we**", "**us**"). The Application is intended solely for use by businesses and their authorized representatives ("**Customer**", "**you**"). By installing, accessing, or using the Application, you agree to these Terms on behalf of the organization you represent. If you do not have authority to bind that organization, or you do not agree, do not use the Application.
 
 ---
 
