@@ -46,8 +46,16 @@ background_tasks: set[asyncio.Task] = set()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Open the DB pool and apply migrations on startup; no-op when DATABASE_URL
-    # is unset. Closed on shutdown so connections don't leak between deploys.
-    await db.init_db()
+    # is unset. A failure here (Neon unreachable, bad URL) disables usage limits
+    # but must NOT take the app down — core screening works without the DB — so
+    # we report it and carry on, mirroring the runtime fail-open in
+    # process_vendor. Closed on shutdown so connections don't leak between
+    # deploys.
+    try:
+        await db.init_db()
+    except Exception as err:
+        log.error("[db] startup init failed — usage limits disabled: %s", err)
+        sentry_sdk.capture_exception(err)
     yield
     await db.close_db()
 

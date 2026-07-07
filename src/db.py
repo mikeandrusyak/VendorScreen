@@ -63,10 +63,17 @@ async def init_db() -> bool:
 
     import asyncpg
 
+    # min_size=0 so the pool holds no connection while idle: this lets Neon's
+    # compute scale to zero (the reason we picked it) instead of a kept-alive
+    # connection burning free compute-hours. max_inactive_connection_lifetime
+    # recycles idle connections before Neon suspends them, so we never hand out
+    # a stale (server-closed) connection after a quiet spell. On an always-on
+    # plan, set DB_POOL_MIN=1 for a warm connection.
     _pool = await asyncpg.create_pool(
         dsn,
-        min_size=int(os.getenv("DB_POOL_MIN", "1")),
+        min_size=int(os.getenv("DB_POOL_MIN", "0")),
         max_size=int(os.getenv("DB_POOL_MAX", "5")),
+        max_inactive_connection_lifetime=float(os.getenv("DB_POOL_MAX_IDLE", "240")),
     )
     await _run_migrations()
     log.info("[db] Connected — migrations applied")
