@@ -2,6 +2,8 @@
 
 Automated KYC/AML compliance screening for vendors on Monday.com boards. It ships as a Monday.com **integration recipe**: when a new item is created, the app queries the OpenSanctions API and writes a risk level — **Clear**, **Warning**, or **Critical** — plus supporting notes back to the columns the customer chose.
 
+If OpenSanctions is temporarily unreachable, the app retries transient failures (429 / 5xx / network errors) with backoff and, if it still can't complete, writes a **Screening Failed** status instead of leaving the record blank — so the check is never lost silently and the customer can re-run it.
+
 > ⚠️ **Informational tool only.** VendorScreen provides indicative screening signals and **does not make compliance decisions**. Results may be incomplete or inaccurate and must be independently verified. Responsibility for regulatory compliance rests with the customer. See [Terms of Service](./TERMS_OF_SERVICE.md) and [Privacy Policy](./PRIVACY_POLICY.md).
 
 ## How it works (recipe model)
@@ -19,7 +21,8 @@ Recipe trigger: "When an item is created"
         └── async process_vendor()
               ├── monday_service.get_item_name(item_id)   → vendor name
               ├── sanctions_service: GET /search/default?q=<name>
-              │     └── maps result → Clear / Warning / Critical
+              │     ├── maps result → Clear / Warning / Critical
+              │     └── retries 429/5xx/network; if still down → Screening Failed
               └── monday_service.update_vendor_record()
                     └── writes status by LABEL (create_labels_if_missing) + details text
 ```
@@ -38,6 +41,8 @@ Only **secrets** live in the environment. Board and column IDs come from the rec
 | `OPENSANCTIONS_API_KEY` | Monday Code + local | OpenSanctions authentication |
 | `APP_ENV` | Monday Code + local | `production` in deploy, `development` locally (`NODE_ENV` is still honored for backwards compatibility) |
 | `MONDAY_API_TOKEN` | **local dev only** | Personal API token used only when no `Authorization` header is present (dev mode). Not needed in production — the token comes from the JWT. |
+| `SENTRY_DSN` | **optional** | Enables Sentry error tracking when set. Unset = tracking disabled, app runs unchanged. PII is never sent (`send_default_pii=False`). |
+| `SENTRY_TRACES_SAMPLE_RATE` | **optional** | Performance tracing sample rate (e.g. `0.1`). Defaults to `0` (errors only). |
 | `PORT` | auto | Provided by Monday Code; defaults to `3000` locally |
 
 > The old single-tenant variables (`MONDAY_BOARD_ID`, `COLUMN_ID_STATUS`, `COLUMN_ID_DETAILS`, `COLUMN_ID_COUNTRY`) are **no longer used** — the app reads these from the recipe input fields.
