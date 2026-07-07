@@ -29,6 +29,16 @@ Recipe trigger: "When an item is created"
 
 Because the status is written **by label** (not by a hard-coded index) and missing labels are auto-created, the app works on any customer board regardless of column order or naming.
 
+## Usage limits (multi-tenant metering)
+
+When `DATABASE_URL` is set, each Monday account is metered against a monthly screening allowance keyed by its plan (`free` / `pro`). Before each paid OpenSanctions call, the app atomically consumes one screening from the account's quota; once the allowance is exhausted the item is marked **Screening Failed** with a message to upgrade or wait for the next period, and no OpenSanctions call is made. The account (`accounts`) and counter (`usage_counters`) tables are created automatically by the startup migration.
+
+The counter's period key is `YYYY-MM`, so allowances reset at the month boundary with no scheduled job. The database is **optional**: with `DATABASE_URL` unset, metering is disabled and every request is screened — identical to prior behavior. A database error never blocks a screening — at runtime the quota check fails open, and a startup connection failure disables limits rather than taking the app down (both are logged and reported to Sentry) — so metering can't take the core product down.
+
+### Capacity and scaling
+
+The default provider is Neon's free tier, which is sized by two independent limits: **compute** (scale-to-zero, so idle time is free — a good fit for spiky screening traffic) and **storage**. Storage is the one to watch as later phases add an audit log and ongoing-monitoring history: keep per-screening rows lean (store a trimmed match summary — top matches, scores, entity IDs — not the full raw provider payload) and the free tier stretches to well over a million rows. When real volume from monitoring outgrows it, upgrading is a **plan change in the Neon console — same project, same `DATABASE_URL`, no code change or data migration**. The single-env-var + repository layer keeps the provider swappable regardless.
+
 ---
 
 ## Environment variables
@@ -43,6 +53,9 @@ Only **secrets** live in the environment. Board and column IDs come from the rec
 | `MONDAY_API_TOKEN` | **local dev only** | Personal API token used only when no `Authorization` header is present (dev mode). Not needed in production — the token comes from the JWT. |
 | `SENTRY_DSN` | **optional** | Enables Sentry error tracking when set. Unset = tracking disabled, app runs unchanged. PII is never sent (`send_default_pii=False`). |
 | `SENTRY_TRACES_SAMPLE_RATE` | **optional** | Performance tracing sample rate (e.g. `0.1`). Defaults to `0` (errors only). |
+| `DATABASE_URL` | **optional** | Postgres connection string (e.g. [Neon](https://neon.com)). Enables per-account monthly usage limits. Unset = limits disabled, app runs unchanged. Migrations apply automatically on startup. |
+| `DB_POOL_MIN` / `DB_POOL_MAX` | **optional** | Connection pool bounds. Default `0` / `5`. `min=0` holds no connection while idle so Neon can scale its compute to zero; set `1` on an always-on plan for a warm connection. |
+| `DB_POOL_MAX_IDLE` | **optional** | Seconds before an idle pooled connection is recycled. Default `240` — below Neon's autosuspend, so a connection closed server-side while idle is never handed back out. |
 | `PORT` | auto | Provided by Monday Code; defaults to `3000` locally |
 
 > The old single-tenant variables (`MONDAY_BOARD_ID`, `COLUMN_ID_STATUS`, `COLUMN_ID_DETAILS`, `COLUMN_ID_COUNTRY`) are **no longer used** — the app reads these from the recipe input fields.

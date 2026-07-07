@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 
@@ -12,12 +13,16 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+import db
+import repository
 from monday_service import get_item_name, update_vendor_record
 from observability import init_sentry
 from sanctions_service import (
+    RISK_LEVEL,
     SanctionsUnavailableError,
     check_vendor_with_retry,
     unavailable_result,
+    with_disclaimer,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -37,7 +42,25 @@ vendor_semaphore = asyncio.Semaphore(CONCURRENCY)
 # Keep strong references to background tasks so they aren't garbage-collected
 background_tasks: set[asyncio.Task] = set()
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Open the DB pool and apply migrations on startup; no-op when DATABASE_URL
+    # is unset. A failure here (Neon unreachable, bad URL) disables usage limits
+    # but must NOT take the app down — core screening works without the DB — so
+    # we report it and carry on, mirroring the runtime fail-open in
+    # process_vendor. Closed on shutdown so connections don't leak between
+    # deploys.
+    try:
+        await db.init_db()
+    except Exception as err:
+        log.error("[db] startup init failed — usage limits disabled: %s", err)
+        sentry_sdk.capture_exception(err)
+    yield
+    await db.close_db()
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 def extract_auth(request: Request):
@@ -126,6 +149,9 @@ async def execute_action(request: Request):
     details_column_id = field_value(fields.get("detailsColumnId"), "columnId", "id", "value")
     # Per-account short-lived token from the JWT (dev: MONDAY_API_TOKEN)
     api_token = auth.get("shortLivedToken")
+    # Tenant key for usage limits. Present on real Monday JWTs; absent in dev
+    # (no signed token) — enforcement is then skipped for that request.
+    account_id = auth.get("accountId")
 
     if not board_id or not item_id or not status_column_id or not details_column_id:
         return JSONResponse(
@@ -141,7 +167,14 @@ async def execute_action(request: Request):
     # Enqueue compliance check — max 3 concurrent to avoid rate limiting.
     # Respond immediately: Monday times out if we wait for the full check.
     task = asyncio.create_task(
-        process_vendor(board_id, item_id, status_column_id, details_column_id, api_token)
+        process_vendor(
+            board_id,
+            item_id,
+            status_column_id,
+            details_column_id,
+            api_token,
+            account_id=account_id,
+        )
     )
     background_tasks.add(task)
     task.add_done_callback(background_tasks.discard)
@@ -150,9 +183,50 @@ async def execute_action(request: Request):
     return {}
 
 
-async def process_vendor(board_id, item_id, status_column_id, details_column_id, api_token):
+async def process_vendor(
+    board_id, item_id, status_column_id, details_column_id, api_token, account_id=None
+):
     async with vendor_semaphore:
         try:
+            # Enforce the account's monthly quota before doing any paid work
+            # (the OpenSanctions call). Skipped when the DB is disabled or the
+            # request has no account (dev). A DB error never blocks screening —
+            # we log it and fall through rather than fail closed.
+            if account_id and db.is_configured():
+                try:
+                    quota = await repository.check_quota(account_id)
+                except Exception as quota_err:
+                    log.error(
+                        "[quota] check failed for account %s: %s — allowing screening",
+                        account_id,
+                        quota_err,
+                    )
+                    sentry_sdk.capture_exception(quota_err)
+                    quota = None
+
+                if quota is not None and not quota.allowed:
+                    log.info(
+                        "[quota] account %s over limit (%d/%d) — skipping item %s",
+                        account_id,
+                        quota.used,
+                        quota.limit,
+                        item_id,
+                    )
+                    await update_vendor_record(
+                        board_id=board_id,
+                        item_id=item_id,
+                        status_column_id=status_column_id,
+                        details_column_id=details_column_id,
+                        risk_level=RISK_LEVEL["UNAVAILABLE"],
+                        details=with_disclaimer(
+                            f"Monthly screening limit reached for the {quota.plan} plan "
+                            f"({quota.limit}/month). This item was not screened — upgrade "
+                            "your plan or wait until the next period."
+                        ),
+                        api_token=api_token,
+                    )
+                    return
+
             vendor_name = await get_item_name(item_id, api_token)
             if not vendor_name:
                 log.error("[vendor] Could not resolve name for item %s — skipping", item_id)
