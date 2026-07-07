@@ -32,6 +32,7 @@ class SanctionsUnavailableError(Exception):
     should be retried, not that the vendor is clear or flagged.
     """
 
+
 # Appended to every details string written to the board. VendorScreen is an
 # informational screening tool — it does not make compliance decisions. See
 # TERMS_OF_SERVICE.md §2. This disclaimer must remain visible in the output.
