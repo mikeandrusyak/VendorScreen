@@ -12,7 +12,11 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from monday_service import get_item_name, update_vendor_record
-from sanctions_service import check_vendor_with_retry
+from sanctions_service import (
+    SanctionsUnavailableError,
+    check_vendor_with_retry,
+    unavailable_result,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("vendorscreen")
@@ -165,6 +169,28 @@ async def process_vendor(board_id, item_id, status_column_id, details_column_id,
             )
 
             log.info("[vendor] Monday.com updated for item %s", item_id)
+        except SanctionsUnavailableError as err:
+            # Screening could not run — don't lose it silently. Mark the board so
+            # the client sees the check needs a re-run instead of a blank status.
+            log.error("[vendor] OpenSanctions unavailable for item %s: %s", item_id, err)
+            result = unavailable_result()
+            try:
+                await update_vendor_record(
+                    board_id=board_id,
+                    item_id=item_id,
+                    status_column_id=status_column_id,
+                    details_column_id=details_column_id,
+                    risk_level=result["riskLevel"],
+                    details=result["details"],
+                    api_token=api_token,
+                )
+                log.info("[vendor] Marked item %s as '%s'", item_id, result["riskLevel"])
+            except Exception as update_err:
+                log.error(
+                    "[vendor] Could not write unavailable status for item %s: %s",
+                    item_id,
+                    update_err,
+                )
         except Exception as err:
             log.error("[vendor] Failed to process item %s: %s", item_id, err)
 

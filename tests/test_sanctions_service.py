@@ -1,11 +1,14 @@
 import httpx
+import pytest
 import respx
 
 from sanctions_service import (
     DISCLAIMER,
     RISK_LEVEL,
+    SanctionsUnavailableError,
     check_vendor,
     check_vendor_with_retry,
+    unavailable_result,
     with_disclaimer,
 )
 
@@ -104,12 +107,62 @@ async def test_retry_recovers_after_429():
 
 
 @respx.mock
-async def test_retry_gives_up_and_raises():
+async def test_retry_gives_up_and_raises_unavailable():
     respx.get(SEARCH_URL).mock(return_value=httpx.Response(429, headers={"retry-after": "0"}))
 
-    try:
+    with pytest.raises(SanctionsUnavailableError):
         await check_vendor_with_retry("Always Limited", retries=2, delay_seconds=0)
-    except httpx.HTTPStatusError as err:
-        assert err.response.status_code == 429
-    else:
-        raise AssertionError("expected HTTPStatusError after exhausting retries")
+
+
+@respx.mock
+async def test_retry_recovers_after_500():
+    route = respx.get(SEARCH_URL)
+    route.side_effect = [httpx.Response(503), _mock([])]
+
+    result = await check_vendor_with_retry("Flaky Server Co", retries=3, delay_seconds=0)
+
+    assert result["riskLevel"] == RISK_LEVEL["CLEAR"]
+    assert route.call_count == 2
+
+
+@respx.mock
+async def test_persistent_5xx_raises_unavailable():
+    respx.get(SEARCH_URL).mock(return_value=httpx.Response(502))
+
+    with pytest.raises(SanctionsUnavailableError):
+        await check_vendor_with_retry("Always Down", retries=2, delay_seconds=0)
+
+
+@respx.mock
+async def test_timeout_raises_unavailable():
+    respx.get(SEARCH_URL).mock(side_effect=httpx.ConnectTimeout("timed out"))
+
+    with pytest.raises(SanctionsUnavailableError):
+        await check_vendor_with_retry("Slow Service", retries=2, delay_seconds=0)
+
+
+@respx.mock
+async def test_connection_error_recovers_on_retry():
+    route = respx.get(SEARCH_URL)
+    route.side_effect = [httpx.ConnectError("refused"), _mock([])]
+
+    result = await check_vendor_with_retry("Blip Co", retries=3, delay_seconds=0)
+
+    assert result["riskLevel"] == RISK_LEVEL["CLEAR"]
+    assert route.call_count == 2
+
+
+@respx.mock
+async def test_non_retryable_4xx_propagates():
+    # A 400/401 is a real error, not a transient outage — surface it as-is.
+    respx.get(SEARCH_URL).mock(return_value=httpx.Response(401))
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await check_vendor_with_retry("Bad Key Co", retries=3, delay_seconds=0)
+
+
+def test_unavailable_result_is_not_clear():
+    result = unavailable_result()
+    assert result["riskLevel"] == RISK_LEVEL["UNAVAILABLE"]
+    assert result["riskLevel"] != RISK_LEVEL["CLEAR"]
+    assert DISCLAIMER in result["details"]

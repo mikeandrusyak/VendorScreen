@@ -8,12 +8,29 @@ log = logging.getLogger("vendorscreen")
 
 OPENSANCTIONS_BASE_URL = "https://api.opensanctions.org"
 
-# Risk level constants matching Monday.com status column labels
+# HTTP statuses worth retrying: rate limiting (429) and transient server-side
+# failures (5xx). Anything else (e.g. 4xx auth/validation) is a real error and
+# is surfaced immediately rather than retried.
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+# Risk level constants matching Monday.com status column labels. UNAVAILABLE is
+# written when screening could not be completed (OpenSanctions down) so the
+# result is never silently lost — Monday auto-creates the label
+# (create_labels_if_missing) and the client can see it needs a re-run.
 RISK_LEVEL = {
     "CLEAR": "Clear",
     "WARNING": "Warning",
     "CRITICAL": "Critical",
+    "UNAVAILABLE": "Screening Failed",
 }
+
+
+class SanctionsUnavailableError(Exception):
+    """OpenSanctions could not be reached after exhausting retries.
+
+    Distinct from a code/logic bug: it means the screening did not run and
+    should be retried, not that the vendor is clear or flagged.
+    """
 
 # Appended to every details string written to the board. VendorScreen is an
 # informational screening tool — it does not make compliance decisions. See
@@ -26,6 +43,21 @@ DISCLAIMER = (
 
 def with_disclaimer(details):
     return f"{details}{DISCLAIMER}"
+
+
+def unavailable_result():
+    """Result written to the board when screening could not be completed.
+
+    Never returns Clear on failure — that would be a false negative. The client
+    sees the check did not run and can re-trigger the automation.
+    """
+    return {
+        "riskLevel": RISK_LEVEL["UNAVAILABLE"],
+        "details": with_disclaimer(
+            "Screening could not be completed — the OpenSanctions service was "
+            "temporarily unavailable. Re-run the automation to try again."
+        ),
+    }
 
 
 async def check_vendor(vendor_name):
@@ -86,23 +118,65 @@ async def check_vendor(vendor_name):
 
 
 async def check_vendor_with_retry(vendor_name, retries=3, delay_seconds=2.0):
-    """Wrap check_vendor with retry logic for 429 rate limiting."""
+    """Wrap check_vendor with retry logic for transient OpenSanctions failures.
+
+    Retries on rate limiting (429), transient server errors (5xx), and
+    network/timeout errors. After exhausting retries on any of these — or on the
+    first non-retryable HTTP error — behaves as follows:
+
+    - transient failures (429/5xx/network) → raise SanctionsUnavailableError so
+      the caller can mark the record instead of losing the check silently;
+    - non-retryable HTTP errors (e.g. 4xx auth/validation) → re-raised as-is,
+      since retrying won't help and they indicate a real problem.
+    """
     for attempt in range(1, retries + 1):
         try:
             return await check_vendor(vendor_name)
         except httpx.HTTPStatusError as err:
-            if err.response.status_code == 429 and attempt < retries:
-                try:
-                    retry_after = int(err.response.headers.get("retry-after") or "0")
-                except ValueError:
-                    retry_after = 0
-                wait_seconds = retry_after if retry_after else delay_seconds * attempt
-                log.warning(
-                    "[sanctions] Rate limited. Retrying in %ss (attempt %d/%d)",
-                    wait_seconds,
-                    attempt,
-                    retries,
-                )
-                await asyncio.sleep(wait_seconds)
-            else:
+            status = err.response.status_code
+            if status not in RETRYABLE_STATUS:
+                # Not transient (bad request, auth, etc.) — retrying is pointless.
                 raise
+            if attempt >= retries:
+                log.error(
+                    "[sanctions] Giving up after %d attempts (last status %d)",
+                    retries,
+                    status,
+                )
+                raise SanctionsUnavailableError(
+                    f"OpenSanctions returned {status} after {retries} attempts"
+                ) from err
+            try:
+                retry_after = int(err.response.headers.get("retry-after") or "0")
+            except ValueError:
+                retry_after = 0
+            wait_seconds = retry_after if retry_after else delay_seconds * attempt
+            log.warning(
+                "[sanctions] HTTP %d. Retrying in %ss (attempt %d/%d)",
+                status,
+                wait_seconds,
+                attempt,
+                retries,
+            )
+            await asyncio.sleep(wait_seconds)
+        except httpx.TransportError as err:
+            # Timeouts, connection failures, DNS errors — OpenSanctions is
+            # unreachable. TransportError covers TimeoutException too.
+            if attempt >= retries:
+                log.error(
+                    "[sanctions] Giving up after %d attempts (network error: %s)",
+                    retries,
+                    err,
+                )
+                raise SanctionsUnavailableError(
+                    f"OpenSanctions unreachable after {retries} attempts: {err}"
+                ) from err
+            wait_seconds = delay_seconds * attempt
+            log.warning(
+                "[sanctions] Network error (%s). Retrying in %ss (attempt %d/%d)",
+                err,
+                wait_seconds,
+                attempt,
+                retries,
+            )
+            await asyncio.sleep(wait_seconds)
