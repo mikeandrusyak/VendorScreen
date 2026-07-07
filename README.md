@@ -41,6 +41,8 @@ Only **secrets** live in the environment. Board and column IDs come from the rec
 | `OPENSANCTIONS_API_KEY` | Monday Code + local | OpenSanctions authentication |
 | `APP_ENV` | Monday Code + local | `production` in deploy, `development` locally (`NODE_ENV` is still honored for backwards compatibility) |
 | `MONDAY_API_TOKEN` | **local dev only** | Personal API token used only when no `Authorization` header is present (dev mode). Not needed in production — the token comes from the JWT. |
+| `SENTRY_DSN` | **optional** | Enables Sentry error tracking when set. Unset = tracking disabled, app runs unchanged. PII is never sent (`send_default_pii=False`). |
+| `SENTRY_TRACES_SAMPLE_RATE` | **optional** | Performance tracing sample rate (e.g. `0.1`). Defaults to `0` (errors only). |
 | `PORT` | auto | Provided by Monday Code; defaults to `3000` locally |
 
 > The old single-tenant variables (`MONDAY_BOARD_ID`, `COLUMN_ID_STATUS`, `COLUMN_ID_DETAILS`, `COLUMN_ID_COUNTRY`) are **no longer used** — the app reads these from the recipe input fields.

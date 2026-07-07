@@ -7,11 +7,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import jwt
+import sentry_sdk
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from monday_service import get_item_name, update_vendor_record
+from observability import init_sentry
 from sanctions_service import (
     SanctionsUnavailableError,
     check_vendor_with_retry,
@@ -24,6 +26,10 @@ log = logging.getLogger("vendorscreen")
 # APP_ENV is the Python-native name; NODE_ENV is still honored so existing
 # Monday Code deployments keep production behavior without re-configuring.
 APP_ENV = os.getenv("APP_ENV") or os.getenv("NODE_ENV") or "development"
+
+# Initialize error tracking before the app is created so the ASGI integration
+# wraps it. No-op unless SENTRY_DSN is set.
+init_sentry(APP_ENV)
 
 # Max 3 concurrent vendor checks — prevents flooding OpenSanctions during bulk imports
 CONCURRENCY = 3
@@ -172,7 +178,9 @@ async def process_vendor(board_id, item_id, status_column_id, details_column_id,
         except SanctionsUnavailableError as err:
             # Screening could not run — don't lose it silently. Mark the board so
             # the client sees the check needs a re-run instead of a blank status.
+            # Reported to Sentry too so we can track OpenSanctions outages.
             log.error("[vendor] OpenSanctions unavailable for item %s: %s", item_id, err)
+            sentry_sdk.capture_exception(err)
             result = unavailable_result()
             try:
                 await update_vendor_record(
@@ -191,8 +199,10 @@ async def process_vendor(board_id, item_id, status_column_id, details_column_id,
                     item_id,
                     update_err,
                 )
+                sentry_sdk.capture_exception(update_err)
         except Exception as err:
             log.error("[vendor] Failed to process item %s: %s", item_id, err)
+            sentry_sdk.capture_exception(err)
 
 
 if __name__ == "__main__":
