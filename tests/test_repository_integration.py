@@ -46,3 +46,34 @@ async def test_quota_allows_exactly_limit_then_blocks(monkeypatch):
             await conn.execute("DELETE FROM usage_counters WHERE account_id = $1", account_id)
             await conn.execute("DELETE FROM accounts WHERE account_id = $1", account_id)
         await db.close_db()
+
+
+async def test_set_plan_upgrades_then_downgrades_account(monkeypatch):
+    # Mirrors a monday subscription webhook: created (free -> pro), then
+    # cancelled (pro -> free), and check_quota must reflect it immediately.
+    monkeypatch.setattr(repository, "PLAN_LIMITS", {"free": 3, "pro": 10})
+    monkeypatch.setenv("DATABASE_URL", TEST_DB_URL)
+    await db.init_db()
+
+    account_id = 900_000_000 + (uuid.uuid4().int % 1_000_000)
+    period = "itest-" + uuid.uuid4().hex[:8]
+    pool = db.get_pool()
+    try:
+        # First sight creates the account on the default plan.
+        first = await repository.check_quota(account_id, period=period)
+        assert first.plan == "free"
+
+        await repository.set_plan(account_id, "pro")
+        upgraded = await repository.check_quota(account_id, period=period)
+        assert upgraded.plan == "pro"
+        assert upgraded.limit == 10
+
+        await repository.set_plan(account_id, "free")
+        downgraded = await repository.check_quota(account_id, period=period)
+        assert downgraded.plan == "free"
+        assert downgraded.limit == 3
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM usage_counters WHERE account_id = $1", account_id)
+            await conn.execute("DELETE FROM accounts WHERE account_id = $1", account_id)
+        await db.close_db()

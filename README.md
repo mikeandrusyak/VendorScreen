@@ -31,9 +31,13 @@ Because the status is written **by label** (not by a hard-coded index) and missi
 
 ## Usage limits (multi-tenant metering)
 
-When `DATABASE_URL` is set, each Monday account is metered against a monthly screening allowance keyed by its plan (`free` / `pro`). Before each paid OpenSanctions call, the app atomically consumes one screening from the account's quota; once the allowance is exhausted the item is marked **Screening Failed** with a message to upgrade or wait for the next period, and no OpenSanctions call is made. The account (`accounts`) and counter (`usage_counters`) tables are created automatically by the startup migration.
+When `DATABASE_URL` is set, each Monday account is metered against a monthly screening allowance keyed by its plan (`free` / `pro` / `business` — see [MONETIZATION.md](./MONETIZATION.md) for pricing and limits). Before each paid OpenSanctions call, the app atomically consumes one screening from the account's quota; once the allowance is exhausted the item is marked **Screening Failed** with a message to upgrade or wait for the next period, and no OpenSanctions call is made. The account (`accounts`) and counter (`usage_counters`) tables are created automatically by the startup migration.
 
 The counter's period key is `YYYY-MM`, so allowances reset at the month boundary with no scheduled job. The database is **optional**: with `DATABASE_URL` unset, metering is disabled and every request is screened — identical to prior behavior. A database error never blocks a screening — at runtime the quota check fails open, and a startup connection failure disables limits rather than taking the app down (both are logged and reported to Sentry) — so metering can't take the core product down.
+
+### Plan sync (monday.com Monetization)
+
+`POST /monday/subscription_webhook` receives subscription created/changed/renewed/cancelled events from monday's built-in Monetization and updates `accounts.plan` accordingly — a customer's plan is driven by what they're actually subscribed to on monday, not set manually in the database. Plan ids configured in Developer Center → Monetization must match the `PLAN_LIMITS` keys in `src/repository.py` (`pro`, `business`) exactly; an unrecognized plan id falls back to `free`. See [MONETIZATION.md](./MONETIZATION.md) for the full pricing model and setup steps.
 
 ### Capacity and scaling
 

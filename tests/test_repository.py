@@ -20,3 +20,10 @@ async def test_check_quota_returns_none_without_pool(monkeypatch):
     # DB disabled → enforcement is skipped by returning None.
     monkeypatch.setattr(db, "_pool", None)
     assert await repository.check_quota(12345) is None
+
+
+async def test_set_plan_noop_without_pool(monkeypatch):
+    # DB disabled → set_plan is a no-op rather than raising, mirroring
+    # check_quota's fail-open behavior.
+    monkeypatch.setattr(db, "_pool", None)
+    await repository.set_plan(12345, "pro")
