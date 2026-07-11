@@ -95,11 +95,7 @@ def _is_sanction(entity):
 def _is_pep(entity):
     datasets = entity.get("datasets") or []
     topics = (entity.get("properties") or {}).get("topics") or []
-    return (
-        any("pep" in ds for ds in datasets)
-        or any("pep" in t for t in topics)
-        or "poi" in topics
-    )
+    return any("pep" in ds for ds in datasets) or any("pep" in t for t in topics) or "poi" in topics
 
 
 def _classify(results, critical, warning):
@@ -171,9 +167,7 @@ async def match_vendor(vendor_name, country=None):
         )
     response.raise_for_status()
 
-    results = (
-        ((response.json().get("responses") or {}).get("vendor") or {}).get("results")
-    ) or []
+    results = (((response.json().get("responses") or {}).get("vendor") or {}).get("results")) or []
 
     classification = _classify(results, critical, warning)
     if classification is None:

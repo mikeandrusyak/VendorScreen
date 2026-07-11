@@ -50,9 +50,7 @@ async def test_no_matches_is_clear():
 @respx.mock
 async def test_high_score_sanction_is_critical():
     respx.post(MATCH_URL).mock(
-        return_value=_mock(
-            [_entity("ent-1", "Bad Actor", 0.95, datasets=["us_ofac_sanctions"])]
-        )
+        return_value=_mock([_entity("ent-1", "Bad Actor", 0.95, datasets=["us_ofac_sanctions"])])
     )
 
     result = await match_vendor("Bad Actor")
@@ -82,9 +80,7 @@ async def test_low_score_sanction_is_warning_not_critical():
 @respx.mock
 async def test_pep_dataset_is_warning():
     respx.post(MATCH_URL).mock(
-        return_value=_mock(
-            [_entity("ent-2", "Politician", 0.9, datasets=["everypolitician_peps"])]
-        )
+        return_value=_mock([_entity("ent-2", "Politician", 0.9, datasets=["everypolitician_peps"])])
     )
 
     result = await match_vendor("Politician")
@@ -109,9 +105,7 @@ async def test_poi_topic_is_warning():
 async def test_below_warning_threshold_is_clear():
     # A weak, unflagged candidate is a namesake, not a hit.
     respx.post(MATCH_URL).mock(
-        return_value=_mock(
-            [_entity("ent-4", "Namesake Corp", 0.4, datasets=["us_ofac_sanctions"])]
-        )
+        return_value=_mock([_entity("ent-4", "Namesake Corp", 0.4, datasets=["us_ofac_sanctions"])])
     )
 
     result = await match_vendor("Namesake Corp")
@@ -151,9 +145,7 @@ async def test_thresholds_are_env_tunable(monkeypatch):
     # Lowering the critical threshold promotes a mid-score sanction to Critical.
     monkeypatch.setenv("MATCH_SCORE_CRITICAL", "0.70")
     respx.post(MATCH_URL).mock(
-        return_value=_mock(
-            [_entity("ent-7", "Mid Score Co", 0.72, datasets=["us_ofac_sanctions"])]
-        )
+        return_value=_mock([_entity("ent-7", "Mid Score Co", 0.72, datasets=["us_ofac_sanctions"])])
     )
 
     result = await match_vendor("Mid Score Co")
