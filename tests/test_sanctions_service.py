@@ -6,17 +6,29 @@ from sanctions_service import (
     DISCLAIMER,
     RISK_LEVEL,
     SanctionsUnavailableError,
-    check_vendor,
     check_vendor_with_retry,
+    match_vendor,
     unavailable_result,
     with_disclaimer,
 )
 
-SEARCH_URL = "https://api.opensanctions.org/search/default"
+MATCH_URL = "https://api.opensanctions.org/match/default"
 
 
 def _mock(results):
-    return httpx.Response(200, json={"results": results})
+    """Build a /match response with the given candidate list under the single
+    query id ("vendor") that match_vendor sends."""
+    return httpx.Response(200, json={"responses": {"vendor": {"results": results}}})
+
+
+def _entity(id, caption, score, *, datasets=None, topics=None):
+    return {
+        "id": id,
+        "caption": caption,
+        "score": score,
+        "datasets": datasets or [],
+        "properties": {"topics": topics or []},
+    }
 
 
 def test_with_disclaimer_appends_notice():
@@ -25,76 +37,133 @@ def test_with_disclaimer_appends_notice():
 
 @respx.mock
 async def test_no_matches_is_clear():
-    respx.get(SEARCH_URL).mock(return_value=_mock([]))
+    respx.post(MATCH_URL).mock(return_value=_mock([]))
 
-    result = await check_vendor("Totally Clean LLC")
+    result = await match_vendor("Totally Clean LLC")
 
     assert result["riskLevel"] == RISK_LEVEL["CLEAR"]
     assert DISCLAIMER in result["details"]
+    assert result["score"] is None
+    assert result["matchId"] is None
 
 
 @respx.mock
-async def test_sanctions_dataset_is_critical():
-    respx.get(SEARCH_URL).mock(
+async def test_high_score_sanction_is_critical():
+    respx.post(MATCH_URL).mock(
         return_value=_mock(
-            [{"id": "ent-1", "caption": "Bad Actor", "datasets": ["us_ofac_sanctions"]}]
+            [_entity("ent-1", "Bad Actor", 0.95, datasets=["us_ofac_sanctions"])]
         )
     )
 
-    result = await check_vendor("Bad Actor")
+    result = await match_vendor("Bad Actor")
 
     assert result["riskLevel"] == RISK_LEVEL["CRITICAL"]
+    assert result["matchId"] == "ent-1"
+    assert "95% match" in result["details"]
     assert "ent-1" in result["details"]
 
 
 @respx.mock
-async def test_pep_dataset_is_warning():
-    respx.get(SEARCH_URL).mock(
+async def test_low_score_sanction_is_warning_not_critical():
+    # A sanction dataset hit that only weakly matches the name is a Warning to
+    # review, not a hard Critical — the score gate is what separates them.
+    respx.post(MATCH_URL).mock(
         return_value=_mock(
-            [{"id": "ent-2", "caption": "Politician", "datasets": ["everypolitician_peps"]}]
+            [_entity("ent-9", "Weak Namesake", 0.75, datasets=["us_ofac_sanctions"])]
         )
     )
 
-    result = await check_vendor("Politician")
+    result = await match_vendor("Weak Namesake")
+
+    assert result["riskLevel"] == RISK_LEVEL["WARNING"]
+    assert result["matchId"] == "ent-9"
+
+
+@respx.mock
+async def test_pep_dataset_is_warning():
+    respx.post(MATCH_URL).mock(
+        return_value=_mock(
+            [_entity("ent-2", "Politician", 0.9, datasets=["everypolitician_peps"])]
+        )
+    )
+
+    result = await match_vendor("Politician")
 
     assert result["riskLevel"] == RISK_LEVEL["WARNING"]
 
 
 @respx.mock
 async def test_poi_topic_is_warning():
-    respx.get(SEARCH_URL).mock(
+    respx.post(MATCH_URL).mock(
         return_value=_mock(
-            [
-                {
-                    "id": "ent-3",
-                    "caption": "Person Of Interest",
-                    "datasets": ["some_list"],
-                    "properties": {"topics": ["poi"]},
-                }
-            ]
+            [_entity("ent-3", "Person Of Interest", 0.88, datasets=["some_list"], topics=["poi"])]
         )
     )
 
-    result = await check_vendor("Person Of Interest")
+    result = await match_vendor("Person Of Interest")
 
     assert result["riskLevel"] == RISK_LEVEL["WARNING"]
 
 
 @respx.mock
-async def test_non_critical_match_is_clear():
-    respx.get(SEARCH_URL).mock(
-        return_value=_mock([{"id": "ent-4", "caption": "Namesake Corp", "datasets": ["some_list"]}])
+async def test_below_warning_threshold_is_clear():
+    # A weak, unflagged candidate is a namesake, not a hit.
+    respx.post(MATCH_URL).mock(
+        return_value=_mock(
+            [_entity("ent-4", "Namesake Corp", 0.4, datasets=["us_ofac_sanctions"])]
+        )
     )
 
-    result = await check_vendor("Namesake Corp")
+    result = await match_vendor("Namesake Corp")
 
     assert result["riskLevel"] == RISK_LEVEL["CLEAR"]
-    assert "Namesake Corp" in result["details"]
+
+
+@respx.mock
+async def test_strong_match_without_flags_is_clear():
+    # High score but no sanction/PEP signal → still Clear (namesake).
+    respx.post(MATCH_URL).mock(
+        return_value=_mock([_entity("ent-5", "Common Name Ltd", 0.97, datasets=["some_list"])])
+    )
+
+    result = await match_vendor("Common Name Ltd")
+
+    assert result["riskLevel"] == RISK_LEVEL["CLEAR"]
+
+
+@respx.mock
+async def test_country_is_sent_in_query():
+    route = respx.post(MATCH_URL).mock(return_value=_mock([]))
+
+    await match_vendor("Acme", country="Ukraine")
+
+    sent = route.calls.last.request
+    import json
+
+    body = json.loads(sent.content)
+    props = body["queries"]["vendor"]["properties"]
+    assert props["name"] == ["Acme"]
+    assert props["country"] == ["Ukraine"]
+
+
+@respx.mock
+async def test_thresholds_are_env_tunable(monkeypatch):
+    # Lowering the critical threshold promotes a mid-score sanction to Critical.
+    monkeypatch.setenv("MATCH_SCORE_CRITICAL", "0.70")
+    respx.post(MATCH_URL).mock(
+        return_value=_mock(
+            [_entity("ent-7", "Mid Score Co", 0.72, datasets=["us_ofac_sanctions"])]
+        )
+    )
+
+    result = await match_vendor("Mid Score Co")
+
+    assert result["riskLevel"] == RISK_LEVEL["CRITICAL"]
 
 
 @respx.mock
 async def test_retry_recovers_after_429():
-    route = respx.get(SEARCH_URL)
+    route = respx.post(MATCH_URL)
     route.side_effect = [
         httpx.Response(429, headers={"retry-after": "0"}),
         _mock([]),
@@ -108,7 +177,7 @@ async def test_retry_recovers_after_429():
 
 @respx.mock
 async def test_retry_gives_up_and_raises_unavailable():
-    respx.get(SEARCH_URL).mock(return_value=httpx.Response(429, headers={"retry-after": "0"}))
+    respx.post(MATCH_URL).mock(return_value=httpx.Response(429, headers={"retry-after": "0"}))
 
     with pytest.raises(SanctionsUnavailableError):
         await check_vendor_with_retry("Always Limited", retries=2, delay_seconds=0)
@@ -116,7 +185,7 @@ async def test_retry_gives_up_and_raises_unavailable():
 
 @respx.mock
 async def test_retry_recovers_after_500():
-    route = respx.get(SEARCH_URL)
+    route = respx.post(MATCH_URL)
     route.side_effect = [httpx.Response(503), _mock([])]
 
     result = await check_vendor_with_retry("Flaky Server Co", retries=3, delay_seconds=0)
@@ -127,7 +196,7 @@ async def test_retry_recovers_after_500():
 
 @respx.mock
 async def test_persistent_5xx_raises_unavailable():
-    respx.get(SEARCH_URL).mock(return_value=httpx.Response(502))
+    respx.post(MATCH_URL).mock(return_value=httpx.Response(502))
 
     with pytest.raises(SanctionsUnavailableError):
         await check_vendor_with_retry("Always Down", retries=2, delay_seconds=0)
@@ -135,7 +204,7 @@ async def test_persistent_5xx_raises_unavailable():
 
 @respx.mock
 async def test_timeout_raises_unavailable():
-    respx.get(SEARCH_URL).mock(side_effect=httpx.ConnectTimeout("timed out"))
+    respx.post(MATCH_URL).mock(side_effect=httpx.ConnectTimeout("timed out"))
 
     with pytest.raises(SanctionsUnavailableError):
         await check_vendor_with_retry("Slow Service", retries=2, delay_seconds=0)
@@ -143,7 +212,7 @@ async def test_timeout_raises_unavailable():
 
 @respx.mock
 async def test_connection_error_recovers_on_retry():
-    route = respx.get(SEARCH_URL)
+    route = respx.post(MATCH_URL)
     route.side_effect = [httpx.ConnectError("refused"), _mock([])]
 
     result = await check_vendor_with_retry("Blip Co", retries=3, delay_seconds=0)
@@ -155,7 +224,7 @@ async def test_connection_error_recovers_on_retry():
 @respx.mock
 async def test_non_retryable_4xx_propagates():
     # A 400/401 is a real error, not a transient outage — surface it as-is.
-    respx.get(SEARCH_URL).mock(return_value=httpx.Response(401))
+    respx.post(MATCH_URL).mock(return_value=httpx.Response(401))
 
     with pytest.raises(httpx.HTTPStatusError):
         await check_vendor_with_retry("Bad Key Co", retries=3, delay_seconds=0)

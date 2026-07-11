@@ -11,8 +11,9 @@ def _stub_screening(monkeypatch, *, name="Acme", result=None):
         calls["get_item_name"] = True
         return name
 
-    async def fake_check(vendor_name):
+    async def fake_check(vendor_name, country=None):
         calls["check"] = vendor_name
+        calls["country"] = country
         return result or {"riskLevel": "Clear", "details": "ok"}
 
     async def fake_update(**kw):
@@ -78,6 +79,42 @@ async def test_db_error_does_not_block_screening(monkeypatch):
     assert calls["check"] == "Acme"  # screening still ran
     assert calls["update"]["risk_level"] == "Clear"
     assert "err" in captured  # and the DB error was reported
+
+
+async def test_country_column_is_read_and_passed_to_screening(monkeypatch):
+    # When the client maps a country column, its value is read and threaded into
+    # the /match query to sharpen the result.
+    monkeypatch.setattr(main.db, "is_configured", lambda: False)
+    calls = _stub_screening(monkeypatch)
+
+    async def fake_country(item_id, column_id, api_token):
+        return "Ukraine"
+
+    monkeypatch.setattr(main, "get_item_column_text", fake_country)
+
+    await main.process_vendor(
+        "b", "i", "s", "d", "tok", account_id=None, country_column_id="country"
+    )
+
+    assert calls["country"] == "Ukraine"
+
+
+async def test_country_read_failure_falls_back_to_name_only(monkeypatch):
+    # A failure reading the country column must not abort the screening.
+    monkeypatch.setattr(main.db, "is_configured", lambda: False)
+    calls = _stub_screening(monkeypatch)
+
+    async def boom(item_id, column_id, api_token):
+        raise RuntimeError("monday down")
+
+    monkeypatch.setattr(main, "get_item_column_text", boom)
+
+    await main.process_vendor(
+        "b", "i", "s", "d", "tok", account_id=None, country_column_id="country"
+    )
+
+    assert calls["check"] == "Acme"  # screening still ran
+    assert calls["country"] is None  # fell back to name-only
 
 
 async def test_no_account_id_skips_quota_entirely(monkeypatch):

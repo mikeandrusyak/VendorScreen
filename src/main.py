@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 
 import db
 import repository
-from monday_service import get_item_name, update_vendor_record
+from monday_service import get_item_column_text, get_item_name, update_vendor_record
 from observability import init_sentry
 from sanctions_service import (
     RISK_LEVEL,
@@ -147,6 +147,9 @@ async def execute_action(request: Request):
     item_id = field_value(fields.get("itemId"), "itemId", "linkedPulseId", "id", "value")
     status_column_id = field_value(fields.get("statusColumnId"), "columnId", "id", "value")
     details_column_id = field_value(fields.get("detailsColumnId"), "columnId", "id", "value")
+    # Optional: the client can map a country column to sharpen the /match query
+    # and cut false positives. Absent → screen on name alone (prior behavior).
+    country_column_id = field_value(fields.get("countryColumnId"), "columnId", "id", "value")
     # Per-account short-lived token from the JWT (dev: MONDAY_API_TOKEN)
     api_token = auth.get("shortLivedToken")
     # Tenant key for usage limits. Present on real Monday JWTs; absent in dev
@@ -174,6 +177,7 @@ async def execute_action(request: Request):
             details_column_id,
             api_token,
             account_id=account_id,
+            country_column_id=country_column_id,
         )
     )
     background_tasks.add(task)
@@ -184,7 +188,13 @@ async def execute_action(request: Request):
 
 
 async def process_vendor(
-    board_id, item_id, status_column_id, details_column_id, api_token, account_id=None
+    board_id,
+    item_id,
+    status_column_id,
+    details_column_id,
+    api_token,
+    account_id=None,
+    country_column_id=None,
 ):
     async with vendor_semaphore:
         try:
@@ -232,9 +242,28 @@ async def process_vendor(
                 log.error("[vendor] Could not resolve name for item %s — skipping", item_id)
                 return
 
-            log.info('[vendor] Checking: "%s" (item %s, board %s)', vendor_name, item_id, board_id)
+            # Optional country refinement. A failure here must not abort the
+            # screening — fall back to name-only rather than losing the check.
+            country = None
+            if country_column_id:
+                try:
+                    country = await get_item_column_text(item_id, country_column_id, api_token)
+                except Exception as country_err:
+                    log.warning(
+                        "[vendor] Could not read country for item %s: %s — screening on name only",
+                        item_id,
+                        country_err,
+                    )
 
-            result = await check_vendor_with_retry(vendor_name)
+            log.info(
+                '[vendor] Checking: "%s" (country=%s, item %s, board %s)',
+                vendor_name,
+                country or "-",
+                item_id,
+                board_id,
+            )
+
+            result = await check_vendor_with_retry(vendor_name, country)
 
             log.info('[vendor] Result for "%s": %s', vendor_name, result["riskLevel"])
 

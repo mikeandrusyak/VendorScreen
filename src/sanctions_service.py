@@ -13,6 +13,19 @@ OPENSANCTIONS_BASE_URL = "https://api.opensanctions.org"
 # is surfaced immediately rather than retried.
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
+# We query the OpenSanctions /match endpoint (not /search) so we get a per-
+# candidate similarity `score` (0-1) and can send a structured entity (name +
+# country + type) instead of a bare text query — far fewer false positives.
+# The schema is the entity type matched against; vendors are companies by
+# default, override with MATCH_SCHEMA (e.g. "Person") for individual vendors.
+MATCH_SCHEMA_DEFAULT = "Company"
+# Score thresholds gate the risk level so a weak namesake doesn't get flagged.
+# A sanction hit at/above CRITICAL is Critical; anything sanction/PEP-related
+# at/above WARNING (but below the critical bar) is a Warning worth review;
+# below WARNING is noise and ignored. Tunable per deployment via env.
+SCORE_CRITICAL_DEFAULT = 0.85
+SCORE_WARNING_DEFAULT = 0.70
+
 # Risk level constants matching Monday.com status column labels. UNAVAILABLE is
 # written when screening could not be completed (OpenSanctions down) so the
 # result is never silently lost — Monday auto-creates the label
@@ -61,65 +74,132 @@ def unavailable_result():
     }
 
 
-async def check_vendor(vendor_name):
+def _thresholds():
+    """Read the (critical, warning) score thresholds from the environment at call
+    time so a deployment can retune them without a code change."""
+    critical = float(os.getenv("MATCH_SCORE_CRITICAL") or SCORE_CRITICAL_DEFAULT)
+    warning = float(os.getenv("MATCH_SCORE_WARNING") or SCORE_WARNING_DEFAULT)
+    return critical, warning
+
+
+def _score(entity):
+    return entity.get("score") or 0.0
+
+
+def _is_sanction(entity):
+    datasets = entity.get("datasets") or []
+    topics = (entity.get("properties") or {}).get("topics") or []
+    return any("sanction" in ds for ds in datasets) or any("sanction" in t for t in topics)
+
+
+def _is_pep(entity):
+    datasets = entity.get("datasets") or []
+    topics = (entity.get("properties") or {}).get("topics") or []
+    return (
+        any("pep" in ds for ds in datasets)
+        or any("pep" in t for t in topics)
+        or "poi" in topics
+    )
+
+
+def _classify(results, critical, warning):
+    """Pick the risk level and the driving match from scored /match candidates.
+
+    Returns (level_key, match_entity) or None for Clear. Only candidates scoring
+    at/above the warning floor are considered — below that is noise. A sanction
+    hit at/above the critical bar is Critical; any remaining sanction/PEP-flagged
+    candidate above the floor is a Warning. A strong name match with no
+    sanction/PEP signal is a namesake, not a hit → Clear.
+    """
+    candidates = [e for e in results if _score(e) >= warning]
+    if not candidates:
+        return None
+
+    sanctioned = [e for e in candidates if _is_sanction(e)]
+    top_sanction = max(sanctioned, key=_score, default=None)
+    if top_sanction is not None and _score(top_sanction) >= critical:
+        return "CRITICAL", top_sanction
+
+    flagged = sanctioned + [e for e in candidates if _is_pep(e)]
+    top_flag = max(flagged, key=_score, default=None)
+    if top_flag is not None:
+        return "WARNING", top_flag
+
+    return None
+
+
+def _clear_result():
+    return {
+        "riskLevel": RISK_LEVEL["CLEAR"],
+        "details": with_disclaimer("No sanction or PEP matches found in OpenSanctions."),
+        "score": None,
+        "matchId": None,
+        "matchCaption": None,
+    }
+
+
+async def match_vendor(vendor_name, country=None):
+    """Screen a vendor via the OpenSanctions /match endpoint.
+
+    Sends a structured entity (schema + name + optional country) and classifies
+    the scored candidates into Clear / Warning / Critical. The returned dict also
+    carries the driving match's score/id/caption so the caller (audit log) can
+    persist a trimmed summary without re-querying.
+    """
+    critical, warning = _thresholds()
+
+    properties = {"name": [vendor_name]}
+    if country:
+        # Monday's country column yields a display name (e.g. "Ukraine"); the
+        # matcher handles names and ISO codes, so pass it through as-is.
+        properties["country"] = [country]
+
+    body = {
+        "queries": {
+            "vendor": {
+                "schema": os.getenv("MATCH_SCHEMA") or MATCH_SCHEMA_DEFAULT,
+                "properties": properties,
+            }
+        }
+    }
+
     async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.get(
-            f"{OPENSANCTIONS_BASE_URL}/search/default",
-            params={"q": vendor_name, "limit": 5},
+        response = await client.post(
+            f"{OPENSANCTIONS_BASE_URL}/match/default",
+            json=body,
             headers={"Authorization": f"ApiKey {os.getenv('OPENSANCTIONS_API_KEY')}"},
         )
     response.raise_for_status()
 
-    results = response.json().get("results") or []
+    results = (
+        ((response.json().get("responses") or {}).get("vendor") or {}).get("results")
+    ) or []
 
-    if not results:
-        return {
-            "riskLevel": RISK_LEVEL["CLEAR"],
-            "details": with_disclaimer("No matches found in OpenSanctions."),
-        }
+    classification = _classify(results, critical, warning)
+    if classification is None:
+        return _clear_result()
 
-    # Check for active sanctions first (Critical), then PEP/minor flags (Warning)
-    has_critical = any(
-        "sanctions" in ds for entity in results for ds in (entity.get("datasets") or [])
+    level, match = classification
+    score_pct = round(_score(match) * 100)
+    profile_url = f"https://www.opensanctions.org/entities/{match['id']}/"
+    label = (
+        "Possible direct sanction match"
+        if level == "CRITICAL"
+        else "Possible PEP or sanction-related flag"
     )
-
-    if has_critical:
-        match = results[0]
-        profile_url = f"https://www.opensanctions.org/entities/{match['id']}/"
-        return {
-            "riskLevel": RISK_LEVEL["CRITICAL"],
-            "details": with_disclaimer(
-                f"Possible direct sanction match: {match.get('caption')}. Profile: {profile_url}"
-            ),
-        }
-
-    has_warning = any(
-        any("pep" in ds for ds in (entity.get("datasets") or []))
-        or "poi" in ((entity.get("properties") or {}).get("topics") or [])
-        for entity in results
-    )
-
-    if has_warning:
-        match = results[0]
-        profile_url = f"https://www.opensanctions.org/entities/{match['id']}/"
-        return {
-            "riskLevel": RISK_LEVEL["WARNING"],
-            "details": with_disclaimer(
-                f"Possible PEP or minor flag: {match.get('caption')}. Profile: {profile_url}"
-            ),
-        }
-
     return {
-        "riskLevel": RISK_LEVEL["CLEAR"],
+        "riskLevel": RISK_LEVEL[level],
         "details": with_disclaimer(
-            "No active sanctions or PEP flags. "
-            f"Possible non-critical match: {results[0].get('caption')}."
+            f"{label}: {match.get('caption')} ({score_pct}% match). Profile: {profile_url}"
         ),
+        "score": _score(match),
+        "matchId": match.get("id"),
+        "matchCaption": match.get("caption"),
     }
 
 
-async def check_vendor_with_retry(vendor_name, retries=3, delay_seconds=2.0):
-    """Wrap check_vendor with retry logic for transient OpenSanctions failures.
+async def check_vendor_with_retry(vendor_name, country=None, retries=3, delay_seconds=2.0):
+    """Wrap match_vendor with retry logic for transient OpenSanctions failures.
 
     Retries on rate limiting (429), transient server errors (5xx), and
     network/timeout errors. After exhausting retries on any of these — or on the
@@ -132,7 +212,7 @@ async def check_vendor_with_retry(vendor_name, retries=3, delay_seconds=2.0):
     """
     for attempt in range(1, retries + 1):
         try:
-            return await check_vendor(vendor_name)
+            return await match_vendor(vendor_name, country)
         except httpx.HTTPStatusError as err:
             status = err.response.status_code
             if status not in RETRYABLE_STATUS:
