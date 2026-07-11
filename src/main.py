@@ -183,6 +183,63 @@ async def execute_action(request: Request):
     return {}
 
 
+# monday.com Monetization webhook — fired when a customer subscribes, changes,
+# renews, or cancels a paid plan (Developer Center → Monetization →
+# subscription webhook URL). Keeps accounts.plan in sync with the plan the
+# customer is actually paying for, so repository.check_quota enforces the
+# right allowance without any manual DB edits.
+#
+# monday's exact event `type` string isn't pinned down here — matched
+# defensively by substring so an exact name mismatch fails open (ignored,
+# logged) instead of crashing. Verify against real webhook deliveries during
+# setup and tighten the match if needed.
+@app.post("/monday/subscription_webhook")
+async def subscription_webhook(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    # URL verification challenge, same handshake as execute_action.
+    if body.get("challenge"):
+        return {"challenge": body["challenge"]}
+
+    if APP_ENV == "production" and extract_auth(request) is None:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+    event_type = (body.get("type") or "").lower()
+    data = body.get("data") or {}
+    account_id = data.get("account_id")
+
+    if not account_id or "subscription" not in event_type:
+        return {}
+
+    subscription = data.get("subscription")
+    if "cancel" in event_type or not subscription:
+        plan = repository.DEFAULT_PLAN
+    else:
+        # Plan ids configured in the Developer Center Monetization tab must
+        # match PLAN_LIMITS keys (see repository.py) — no translation layer.
+        plan = subscription.get("plan_id") or repository.DEFAULT_PLAN
+        if plan not in repository.PLAN_LIMITS:
+            log.warning(
+                "[subscription] unknown monday plan_id %r for account %s — defaulting to %s",
+                plan,
+                account_id,
+                repository.DEFAULT_PLAN,
+            )
+            plan = repository.DEFAULT_PLAN
+
+    try:
+        await repository.set_plan(account_id, plan)
+        log.info("[subscription] account %s -> plan %s (event %s)", account_id, plan, event_type)
+    except Exception as err:
+        log.error("[subscription] failed to update plan for account %s: %s", account_id, err)
+        sentry_sdk.capture_exception(err)
+
+    return {}
+
+
 async def process_vendor(
     board_id, item_id, status_column_id, details_column_id, api_token, account_id=None
 ):

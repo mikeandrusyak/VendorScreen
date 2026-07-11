@@ -4,11 +4,15 @@ from dataclasses import dataclass
 import db
 
 # Monthly screening allowance per plan. `free` is the default for any account we
-# haven't explicitly upgraded. These are placeholder numbers for the P0
-# monetization foundation — tune them once pricing is finalized.
+# haven't explicitly upgraded. Matches the launch pricing in MONETIZATION.md —
+# a single shared quota per plan (new screenings and, later, ongoing-monitoring
+# rescreens both draw from it). Plan ids here must match the plan ids
+# configured in the monday.com Developer Center Monetization tab, since the
+# subscription webhook in main.py passes monday's plan_id straight through.
 PLAN_LIMITS = {
-    "free": 50,
-    "pro": 10_000,
+    "free": 20,
+    "pro": 400,
+    "business": 1500,
 }
 DEFAULT_PLAN = "free"
 
@@ -67,6 +71,24 @@ async def check_quota(account_id, period: str | None = None) -> QuotaResult | No
             )
             return QuotaResult(allowed=False, used=current or limit, limit=limit, plan=plan)
         return QuotaResult(allowed=True, used=used, limit=limit, plan=plan)
+
+
+async def set_plan(account_id, plan: str) -> None:
+    """Upsert an account's plan, driven by a monday.com subscription webhook
+    event (created/changed/renewed/cancelled). No-op when the database is
+    disabled, mirroring check_quota's fail-open behavior."""
+    pool = db.get_pool()
+    if pool is None:
+        return
+
+    account_id = int(account_id)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO accounts (account_id, plan) VALUES ($1, $2) "
+            "ON CONFLICT (account_id) DO UPDATE SET plan = EXCLUDED.plan",
+            account_id,
+            plan,
+        )
 
 
 async def _get_or_create_account(conn, account_id) -> str:

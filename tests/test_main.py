@@ -2,11 +2,13 @@ import jwt
 from fastapi.testclient import TestClient
 
 import main
+import repository
 from main import app, field_value
 
 client = TestClient(app)
 
 ACTION_URL = "/monday/execute_action"
+SUBSCRIPTION_URL = "/monday/subscription_webhook"
 
 
 def _valid_fields():
@@ -116,3 +118,100 @@ def test_valid_jwt_authorizes(monkeypatch):
 
 async def _noop(*args, **kwargs):
     pass
+
+
+# --- subscription_webhook ----------------------------------------------------
+
+
+def _subscription_event(event_type, account_id=555, plan_id="pro"):
+    return {
+        "type": event_type,
+        "data": {
+            "account_id": account_id,
+            "subscription": {"plan_id": plan_id} if plan_id else None,
+        },
+    }
+
+
+def test_subscription_challenge_is_echoed():
+    resp = client.post(SUBSCRIPTION_URL, json={"challenge": "xyz789"})
+    assert resp.status_code == 200
+    assert resp.json() == {"challenge": "xyz789"}
+
+
+def test_subscription_webhook_requires_auth_in_production(monkeypatch):
+    monkeypatch.setattr(main, "APP_ENV", "production")
+    resp = client.post(SUBSCRIPTION_URL, json=_subscription_event("subscription_created"))
+    assert resp.status_code == 401
+
+
+def test_subscription_created_upgrades_plan(monkeypatch):
+    monkeypatch.setattr(main, "APP_ENV", "development")
+    seen = {}
+
+    async def fake_set_plan(account_id, plan):
+        seen["account_id"] = account_id
+        seen["plan"] = plan
+
+    monkeypatch.setattr(repository, "set_plan", fake_set_plan)
+
+    resp = client.post(
+        SUBSCRIPTION_URL, json=_subscription_event("subscription_created", plan_id="pro")
+    )
+
+    assert resp.status_code == 200
+    assert seen == {"account_id": 555, "plan": "pro"}
+
+
+def test_subscription_cancelled_downgrades_to_free(monkeypatch):
+    monkeypatch.setattr(main, "APP_ENV", "development")
+    seen = {}
+
+    async def fake_set_plan(account_id, plan):
+        seen["account_id"] = account_id
+        seen["plan"] = plan
+
+    monkeypatch.setattr(repository, "set_plan", fake_set_plan)
+
+    resp = client.post(
+        SUBSCRIPTION_URL,
+        json=_subscription_event("subscription_cancelled", plan_id=None),
+    )
+
+    assert resp.status_code == 200
+    assert seen == {"account_id": 555, "plan": "free"}
+
+
+def test_subscription_unknown_plan_id_defaults_to_free(monkeypatch):
+    monkeypatch.setattr(main, "APP_ENV", "development")
+    seen = {}
+
+    async def fake_set_plan(account_id, plan):
+        seen["account_id"] = account_id
+        seen["plan"] = plan
+
+    monkeypatch.setattr(repository, "set_plan", fake_set_plan)
+
+    resp = client.post(
+        SUBSCRIPTION_URL,
+        json=_subscription_event("subscription_changed", plan_id="mystery_tier"),
+    )
+
+    assert resp.status_code == 200
+    assert seen == {"account_id": 555, "plan": "free"}
+
+
+def test_subscription_unrelated_event_is_ignored(monkeypatch):
+    monkeypatch.setattr(main, "APP_ENV", "development")
+    called = False
+
+    async def fake_set_plan(account_id, plan):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(repository, "set_plan", fake_set_plan)
+
+    resp = client.post(SUBSCRIPTION_URL, json={"type": "item_created", "data": {"account_id": 1}})
+
+    assert resp.status_code == 200
+    assert called is False
