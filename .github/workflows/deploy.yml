@@ -156,4 +156,10 @@ jobs:
           E2E_STATUS_COLUMN: ${{ vars.E2E_STATUS_COLUMN }}
           E2E_DETAILS_COLUMN: ${{ vars.E2E_DETAILS_COLUMN }}
           E2E_VENDOR_NAME: ${{ vars.E2E_VENDOR_NAME }}
+          # Optional country column — exercises the /match country refinement.
+          E2E_COUNTRY_COLUMN: ${{ vars.E2E_COUNTRY_COLUMN }}
+          # Set the E2E_SKIP_EXPORT repo variable to "1" to skip the
+          # export/notification stage until the app has the notifications:write
+          # scope and DATABASE_URL; unset/empty runs the full flow.
+          E2E_SKIP_EXPORT: ${{ vars.E2E_SKIP_EXPORT }}
         run: python scripts/e2e_smoke.py
