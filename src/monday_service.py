@@ -34,6 +34,29 @@ async def get_item_name(item_id, api_token):
     return items[0].get("name") if items else None
 
 
+async def get_item_column_text(item_id, column_id, api_token):
+    """Read the display text of a single column on an item (e.g. the country the
+    client mapped in the recipe). Returns None if the column is empty or absent —
+    country is an optional refinement, never required for screening."""
+    query = """
+      query ($itemId: [ID!], $columnIds: [String!]) {
+        items (ids: $itemId) {
+          column_values (ids: $columnIds) { id text }
+        }
+      }
+    """
+    data = await monday_request(
+        query, {"itemId": [str(item_id)], "columnIds": [str(column_id)]}, api_token
+    )
+    items = (data.get("data") or {}).get("items") or []
+    if not items:
+        return None
+    for cv in items[0].get("column_values") or []:
+        if cv.get("id") == str(column_id):
+            return cv.get("text") or None
+    return None
+
+
 async def update_vendor_record(
     *, board_id, item_id, status_column_id, details_column_id, risk_level, details, api_token
 ):

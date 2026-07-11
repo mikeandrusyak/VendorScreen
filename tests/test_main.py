@@ -81,10 +81,17 @@ def test_valid_payload_enqueues_and_returns_empty(monkeypatch):
     seen = {}
 
     async def fake_process(
-        board_id, item_id, status_column_id, details_column_id, api_token, account_id=None
+        board_id,
+        item_id,
+        status_column_id,
+        details_column_id,
+        api_token,
+        account_id=None,
+        country_column_id=None,
     ):
         seen["args"] = (board_id, item_id, status_column_id, details_column_id, api_token)
         seen["account_id"] = account_id
+        seen["country_column_id"] = country_column_id
 
     monkeypatch.setattr(main, "process_vendor", fake_process)
 

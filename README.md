@@ -15,13 +15,15 @@ Recipe trigger: "When an item is created"
   └── Monday POSTs to /monday/execute_action
         ├── Challenge handshake (action URL registration only)
         ├── JWT verification via MONDAY_SIGNING_SECRET (production)
-        ├── reads payload.inboundFieldValues → boardId, itemId, statusColumnId, detailsColumnId
+        ├── reads payload.inboundFieldValues → boardId, itemId, statusColumnId,
+        │     detailsColumnId, [countryColumnId — optional]
         │     (chosen by the CUSTOMER in the automation UI — NOT from .env)
         ├── 200 OK returned immediately
         └── async process_vendor()
               ├── monday_service.get_item_name(item_id)   → vendor name
-              ├── sanctions_service: GET /search/default?q=<name>
-              │     ├── maps result → Clear / Warning / Critical
+              ├── [optional] get_item_column_text(countryColumnId) → country
+              ├── sanctions_service: POST /match/default (name + country + schema)
+              │     ├── scored candidates → Clear / Warning / Critical (score thresholds)
               │     └── retries 429/5xx/network; if still down → Screening Failed
               └── monday_service.update_vendor_record()
                     └── writes status by LABEL (create_labels_if_missing) + details text
@@ -57,6 +59,9 @@ Only **secrets** live in the environment. Board and column IDs come from the rec
 | `MONDAY_API_TOKEN` | **local dev only** | Personal API token used only when no `Authorization` header is present (dev mode). Not needed in production — the token comes from the JWT. |
 | `SENTRY_DSN` | **optional** | Enables Sentry error tracking when set. Unset = tracking disabled, app runs unchanged. PII is never sent (`send_default_pii=False`). |
 | `SENTRY_TRACES_SAMPLE_RATE` | **optional** | Performance tracing sample rate (e.g. `0.1`). Defaults to `0` (errors only). |
+| `MATCH_SCHEMA` | **optional** | OpenSanctions entity type matched against in `/match`. Defaults to `Company` (vendors); set `Person` for boards of individual vendors. |
+| `MATCH_SCORE_CRITICAL` | **optional** | Minimum candidate score (0–1) for a sanction hit to be **Critical**. Default `0.85`. |
+| `MATCH_SCORE_WARNING` | **optional** | Score floor (0–1) below which candidates are treated as noise; sanction/PEP hits at/above it (but below critical) are **Warning**. Default `0.70`. |
 | `DATABASE_URL` | **optional** | Postgres connection string (e.g. [Neon](https://neon.com)). Enables per-account monthly usage limits. Unset = limits disabled, app runs unchanged. Migrations apply automatically on startup. |
 | `DB_POOL_MIN` / `DB_POOL_MAX` | **optional** | Connection pool bounds. Default `0` / `5`. `min=0` holds no connection while idle so Neon can scale its compute to zero; set `1` on an always-on plan for a warm connection. |
 | `DB_POOL_MAX_IDLE` | **optional** | Seconds before an idle pooled connection is recycled. Default `240` — below Neon's autosuspend, so a connection closed server-side while idle is never handed back out. |
@@ -106,6 +111,7 @@ The code does nothing until the integration recipe is configured. Field names be
    - `itemId` — type **Item** (from the trigger)
    - `statusColumnId` — type **Status Column** (picker)
    - `detailsColumnId` — type **Text / Long Text Column** (picker)
+   - `countryColumnId` — type **Country / Text Column** (picker), **optional** — when mapped, the vendor's country is sent to OpenSanctions `/match` to sharpen scoring and cut false positives
 4. **Action URL:** `https://<your-app>.monday.app/monday/execute_action`
 5. **Recipe sentence:** *"When an item is created, screen the vendor and set {statusColumn} with details in {detailsColumn}"* — this is where the customer maps their own columns.
 6. **Scopes:** `boards:read`, `boards:write`.
