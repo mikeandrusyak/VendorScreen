@@ -27,3 +27,29 @@ async def test_set_plan_noop_without_pool(monkeypatch):
     # check_quota's fail-open behavior.
     monkeypatch.setattr(db, "_pool", None)
     await repository.set_plan(12345, "pro")
+
+
+async def test_record_event_noop_without_pool(monkeypatch):
+    # DB disabled → recording an audit event is a no-op, never raising, so a
+    # screening is never blocked by auditing being off.
+    monkeypatch.setattr(db, "_pool", None)
+    await repository.record_event(
+        account_id=1,
+        board_id=2,
+        item_id=3,
+        vendor_name="Acme",
+        risk_level="Clear",
+    )
+
+
+async def test_list_events_empty_without_pool(monkeypatch):
+    monkeypatch.setattr(db, "_pool", None)
+    assert await repository.list_events(1) == []
+
+
+def test_as_bigint_coerces_and_tolerates_junk():
+    assert repository._as_bigint("456") == 456
+    assert repository._as_bigint(789) == 789
+    assert repository._as_bigint(None) is None
+    # A non-numeric id becomes NULL rather than raising and losing the row.
+    assert repository._as_bigint("not-a-number") is None

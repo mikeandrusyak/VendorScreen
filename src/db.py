@@ -32,6 +32,32 @@ MIGRATIONS: list[tuple[int, str]] = [
         );
         """,
     ),
+    (
+        2,
+        # Append-only audit log of every screening outcome, one row per board
+        # write. Deliberately stores a TRIMMED summary (risk level + top match's
+        # score/id/caption), never the raw provider payload, to keep rows lean —
+        # the free Neon tier then stretches to well over a million screenings
+        # (see README "Capacity and scaling"). No FK to accounts: the audit trail
+        # must never fail to record because of row ordering or a missing parent.
+        """
+        CREATE TABLE IF NOT EXISTS screening_events (
+            id            BIGSERIAL PRIMARY KEY,
+            account_id    BIGINT NOT NULL,
+            board_id      BIGINT,
+            item_id       BIGINT,
+            vendor_name   TEXT,
+            risk_level    TEXT NOT NULL,
+            score         DOUBLE PRECISION,
+            match_id      TEXT,
+            match_caption TEXT,
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_screening_events_account_created
+            ON screening_events (account_id, created_at DESC);
+        """,
+    ),
 ]
 
 

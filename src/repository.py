@@ -91,6 +91,74 @@ async def set_plan(account_id, plan: str) -> None:
         )
 
 
+async def record_event(
+    *,
+    account_id,
+    board_id,
+    item_id,
+    vendor_name,
+    risk_level,
+    score=None,
+    match_id=None,
+    match_caption=None,
+) -> None:
+    """Append one screening outcome to the audit log.
+
+    No-op when the database is disabled (pool is None), mirroring check_quota's
+    fail-open behavior — auditing must never block or fail a screening. The board
+    / item ids are stored as BIGINT (monday ids are numeric); a non-numeric id is
+    coerced to NULL rather than raising, so a malformed id can't lose the row.
+    """
+    pool = db.get_pool()
+    if pool is None:
+        return
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO screening_events "
+            "(account_id, board_id, item_id, vendor_name, risk_level, score, "
+            "match_id, match_caption) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            int(account_id),
+            _as_bigint(board_id),
+            _as_bigint(item_id),
+            vendor_name,
+            risk_level,
+            score,
+            match_id,
+            match_caption,
+        )
+
+
+async def list_events(account_id, limit: int = 10_000) -> list[dict]:
+    """Return an account's screening events, newest first, for CSV export.
+
+    Returns an empty list when the database is disabled. Capped by `limit` so a
+    single export can't stream an unbounded result set.
+    """
+    pool = db.get_pool()
+    if pool is None:
+        return []
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT created_at, board_id, item_id, vendor_name, risk_level, "
+            "score, match_id, match_caption FROM screening_events "
+            "WHERE account_id = $1 ORDER BY created_at DESC LIMIT $2",
+            int(account_id),
+            limit,
+        )
+    return [dict(row) for row in rows]
+
+
+def _as_bigint(value):
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 async def _get_or_create_account(conn, account_id) -> str:
     # The no-op DO UPDATE (instead of DO NOTHING) is what lets RETURNING give us
     # back the plan on both insert and conflict.

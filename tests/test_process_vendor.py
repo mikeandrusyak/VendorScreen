@@ -117,6 +117,83 @@ async def test_country_read_failure_falls_back_to_name_only(monkeypatch):
     assert calls["country"] is None  # fell back to name-only
 
 
+async def test_successful_screening_records_audit_event(monkeypatch):
+    # With a tenant + DB, the outcome (incl. the match summary) is logged.
+    monkeypatch.setattr(main.db, "is_configured", lambda: True)
+
+    async def fake_quota(account_id):
+        return QuotaResult(allowed=True, used=1, limit=50, plan="free")
+
+    monkeypatch.setattr(main.repository, "check_quota", fake_quota)
+    _stub_screening(
+        monkeypatch,
+        result={
+            "riskLevel": "Critical",
+            "details": "hit",
+            "score": 0.95,
+            "matchId": "ent-1",
+            "matchCaption": "Bad Actor",
+        },
+    )
+
+    recorded = {}
+
+    async def fake_record(**kw):
+        recorded.update(kw)
+
+    monkeypatch.setattr(main.repository, "record_event", fake_record)
+
+    await main.process_vendor("b", "i", "s", "d", "tok", account_id="123")
+
+    assert recorded["account_id"] == "123"
+    assert recorded["risk_level"] == "Critical"
+    assert recorded["score"] == 0.95
+    assert recorded["match_id"] == "ent-1"
+    assert recorded["vendor_name"] == "Acme"
+
+
+async def test_audit_skipped_without_account(monkeypatch):
+    # Dev requests (no account) don't write audit rows.
+    monkeypatch.setattr(main.db, "is_configured", lambda: True)
+    _stub_screening(monkeypatch)
+
+    called = {"record": False}
+
+    async def fake_record(**kw):
+        called["record"] = True
+
+    monkeypatch.setattr(main.repository, "record_event", fake_record)
+
+    await main.process_vendor("b", "i", "s", "d", "tok", account_id=None)
+
+    assert called["record"] is False
+
+
+async def test_audit_failure_does_not_break_screening(monkeypatch):
+    # An audit write blowing up must not fail the screening that already landed.
+    monkeypatch.setattr(main.db, "is_configured", lambda: True)
+
+    async def fake_quota(account_id):
+        return QuotaResult(allowed=True, used=1, limit=50, plan="free")
+
+    monkeypatch.setattr(main.repository, "check_quota", fake_quota)
+    calls = _stub_screening(monkeypatch, result={"riskLevel": "Clear", "details": "ok"})
+
+    async def boom(**kw):
+        raise RuntimeError("audit db down")
+
+    monkeypatch.setattr(main.repository, "record_event", boom)
+    captured = {}
+    monkeypatch.setattr(
+        main.sentry_sdk, "capture_exception", lambda err: captured.setdefault("err", err)
+    )
+
+    await main.process_vendor("b", "i", "s", "d", "tok", account_id="123")
+
+    assert calls["update"]["risk_level"] == "Clear"  # screening still completed
+    assert "err" in captured  # audit failure was reported, not raised
+
+
 async def test_no_account_id_skips_quota_entirely(monkeypatch):
     # Dev requests have no account — quota must not even be consulted.
     monkeypatch.setattr(main.db, "is_configured", lambda: True)

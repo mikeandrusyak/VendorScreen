@@ -222,3 +222,97 @@ def test_subscription_unrelated_event_is_ignored(monkeypatch):
 
     assert resp.status_code == 200
     assert called is False
+
+
+# --- audit export ------------------------------------------------------------
+
+EXPORT_URL = "/monday/export_action"
+DOWNLOAD_URL = "/audit/export"
+
+
+def _export_jwt(secret="test-secret", account_id=777, user_id=42):
+    return jwt.encode(
+        {"shortLivedToken": "slt-1", "accountId": account_id, "userId": user_id, "aud": "x"},
+        secret,
+        algorithm="HS256",
+    )
+
+
+def test_export_action_challenge_is_echoed():
+    resp = client.post(EXPORT_URL, json={"challenge": "abc"})
+    assert resp.status_code == 200
+    assert resp.json() == {"challenge": "abc"}
+
+
+def test_export_action_requires_account(monkeypatch):
+    # Dev fallback auth has no accountId, so there's no tenant to scope to.
+    monkeypatch.setattr(main, "APP_ENV", "development")
+    monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
+
+    resp = client.post(EXPORT_URL, json={"payload": {"inboundFieldValues": {"itemId": "1"}}})
+
+    assert resp.status_code == 400
+
+
+def test_export_action_sends_notification_link(monkeypatch):
+    monkeypatch.setenv("MONDAY_SIGNING_SECRET", "test-secret")
+    sent = {}
+
+    async def fake_notify(user_id, item_id, text, api_token):
+        sent["user_id"] = user_id
+        sent["item_id"] = item_id
+        sent["text"] = text
+
+    monkeypatch.setattr(main, "create_notification", fake_notify)
+
+    resp = client.post(
+        EXPORT_URL,
+        json={"payload": {"inboundFieldValues": {"itemId": {"itemId": "456"}}}},
+        headers={"Authorization": f"Bearer {_export_jwt()}"},
+    )
+
+    assert resp.status_code == 200
+    assert sent["user_id"] == 42
+    assert sent["item_id"] == "456"
+    # The notification carries a tokenized download link.
+    assert "/audit/export?token=" in sent["text"]
+
+
+def test_download_rejects_invalid_token():
+    resp = client.get(DOWNLOAD_URL, params={"token": "garbage"})
+    assert resp.status_code == 401
+
+
+def test_download_streams_csv_for_valid_token(monkeypatch):
+    monkeypatch.setenv("MONDAY_SIGNING_SECRET", "test-secret")
+
+    import datetime as dt
+
+    async def fake_list_events(account_id, limit=10_000):
+        assert account_id == 777
+        return [
+            {
+                "created_at": dt.datetime(2026, 7, 11, 9, 0, tzinfo=dt.UTC),
+                "board_id": 123,
+                "item_id": 456,
+                "vendor_name": "Bad Actor",
+                "risk_level": "Critical",
+                "score": 0.95,
+                "match_id": "ent-1",
+                "match_caption": "Bad Actor",
+            }
+        ]
+
+    monkeypatch.setattr(repository, "list_events", fake_list_events)
+
+    token = main.export_token.issue(777)
+    resp = client.get(DOWNLOAD_URL, params={"token": token})
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert "attachment" in resp.headers["content-disposition"]
+    body = resp.text
+    assert "created_at,board_id,item_id,vendor_name,risk_level,score,match_id,match_caption" in body
+    assert "Bad Actor" in body
+    assert "Critical" in body
+    assert "0.95" in body
