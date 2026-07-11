@@ -172,8 +172,12 @@ jobs:
           E2E_VENDOR_NAME: ${{ vars.E2E_VENDOR_NAME }}
           # Optional country column — exercises the /match country refinement.
           E2E_COUNTRY_COLUMN: ${{ vars.E2E_COUNTRY_COLUMN }}
-          # Set the E2E_SKIP_EXPORT repo variable to "1" to skip the
-          # export/notification stage until the app has the notifications:write
-          # scope and DATABASE_URL; unset/empty runs the full flow.
+          # E2E_SKIP_EXPORT=1 skips the whole export section (audit CSV +
+          # notification) — e.g. until DATABASE_URL is set on the deploy.
           E2E_SKIP_EXPORT: ${{ vars.E2E_SKIP_EXPORT }}
+          # The notification stage is opt-in and live-only (a personal token
+          # notifying itself may be rejected in CI, and it doesn't exercise the
+          # real notifications:write scope). Default off; set E2E_RUN_NOTIFY=1
+          # only if you knowingly want CI to attempt it.
+          E2E_RUN_NOTIFY: ${{ vars.E2E_RUN_NOTIFY }}
         run: python scripts/e2e_smoke.py

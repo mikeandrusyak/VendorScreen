@@ -97,7 +97,8 @@ export E2E_STATUS_COLUMN="<Risk column id>"
 export E2E_DETAILS_COLUMN="<Details column id>"
 # optional:
 export E2E_COUNTRY_COLUMN="<Country column id>"   # exercises the /match country path
-# export E2E_SKIP_EXPORT=1                         # skip export/notify stage temporarily
+# export E2E_SKIP_EXPORT=1                         # skip the whole export section
+# export E2E_RUN_NOTIFY=1                          # also attempt the notification (live-only)
 
 python scripts/e2e_smoke.py
 ```
@@ -107,14 +108,19 @@ python scripts/e2e_smoke.py
 |---|---|
 | `health OK` | the draft booted with its secrets |
 | `PASS screening` | `/match` ran and wrote a **score-based** result — details carry `% match` + an OpenSanctions profile link (PR1) |
-| `PASS notification` | `POST /monday/export_action` returned 200, i.e. the real **`create_notification`** mutation + `notifications:write` scope work — the same call the Critical alert uses |
-| `PASS audit export` | `GET /audit/export` streamed a CSV that contains the screening just run (PR2) |
-
-A `502` at the notification stage is the script telling you `notifications:write`
-isn't granted yet (or the mutation shape is off) — fix step 2a and re-run.
+| `PASS audit export` | `GET /audit/export` streamed a CSV that contains the screening just run (PR2) — deterministic, always run unless `E2E_SKIP_EXPORT=1` |
+| `PASS notification` | *(opt-in, `E2E_RUN_NOTIFY=1`)* `POST /monday/export_action` returned 200, i.e. the `create_notification` mutation works |
 
 A `WARN audit export ... item absent` means the CSV was valid but empty of your
 row — almost always `DATABASE_URL` isn't set on the deployment (step 2d).
+
+**The notification stage is off by default, on purpose.** In CI the caller token
+is a personal token acting as its *own* recipient, so it does **not** exercise the
+real `notifications:write` OAuth scope (that only applies to a genuine short-lived
+recipe token) and monday may reject a self-notification. So a green CI does *not*
+prove notifications work for real customers — that's a live-recipe check (below).
+Turn it on with `E2E_RUN_NOTIFY=1` only if you knowingly want CI to attempt it; a
+`502` then means the mutation/scope failed **or** the self-notify was rejected.
 
 ### The one thing the script can't prove
 The script **mints its own JWT**, so it can't confirm that monday's *real* action

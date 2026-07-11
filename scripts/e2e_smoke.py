@@ -11,11 +11,10 @@ What it verifies (the real product flow, not mocks):
   4. trigger the action endpoint    -> POST /monday/execute_action
   5. the app screens via /match     -> we read status + details back and assert
                                         the score-based result (P1: /match)
-  6. the audit export round-trips   -> POST /monday/export_action (proves the
-                                        real create_notification mutation +
-                                        notifications:write scope), then
-                                        GET /audit/export streams the CSV
+  6. the audit export round-trips   -> GET /audit/export streams the CSV
                                         containing our screening (P1: audit log)
+  7. (opt-in) the notification path -> POST /monday/export_action returns 200
+                                        (E2E_RUN_NOTIFY=1; see the caveat below)
 
 We craft the request exactly as monday's Integration Framework would, so this
 does NOT depend on the recipe/automation being installed. The app verifies the
@@ -24,11 +23,15 @@ a real API token inside as `shortLivedToken` (what the app uses for GraphQL),
 plus the `accountId` and `userId` claims the P1 features need (usage metering,
 audit scoping, and Critical alerts).
 
-Why POST /monday/export_action is the create_notification canary: the export
-action calls monday's `create_notification` (target_type Project) and returns
-502 if it fails, so a 200 proves the exact mutation and scope the Critical-risk
-alert path also depends on — which is otherwise fail-open and invisible from
-outside.
+The audit CSV round-trip is deterministic and faithful in CI: we mint the export
+token with the same MONDAY_SIGNING_SECRET the app verifies, so it exercises the
+real audit-log + export path.
+
+The notification stage (step 7) is OPT-IN and really a live-only check. In CI the
+caller token is a personal token acting as its OWN recipient, so it does NOT
+exercise the real notifications:write OAuth scope (that only applies to a genuine
+short-lived recipe token) and monday may reject a self-notification. So it is off
+by default; confirm the scope with a real recipe run instead.
 
 Required env:
   APP_URL                base URL of the deployed draft (e.g. https://xxx.monday.app)
@@ -46,8 +49,10 @@ Optional:
   E2E_COUNTRY_VALUE      value written to that column before screening (default Russia)
   E2E_ACCOUNT_ID         override the account id (default: derived from the token)
   E2E_USER_ID            override the alert recipient (default: derived from token)
-  E2E_SKIP_EXPORT        set to "1" to skip the export/notification stage (e.g.
-                         before notifications:write is granted or DATABASE_URL set)
+  E2E_SKIP_EXPORT        set to "1" to skip the whole export section (audit CSV
+                         and notification), e.g. before DATABASE_URL is set
+  E2E_RUN_NOTIFY         set to "1" to also run the opt-in notification stage
+                         (live-only check — see the caveat above)
   E2E_KEEP_ITEMS         how many recent test items to keep on the board (default 20)
 
 Test items are NOT deleted after each run — recent history is kept for debugging.
@@ -74,6 +79,7 @@ EXPECT_LEVEL = os.environ.get("E2E_EXPECT_LEVEL", "Critical")
 COUNTRY_COL = os.environ.get("E2E_COUNTRY_COLUMN")
 COUNTRY_VALUE = os.environ.get("E2E_COUNTRY_VALUE", "Russia")
 SKIP_EXPORT = os.environ.get("E2E_SKIP_EXPORT") == "1"
+RUN_NOTIFY = os.environ.get("E2E_RUN_NOTIFY") == "1"
 KEEP_ITEMS = int(os.environ.get("E2E_KEEP_ITEMS", "20"))
 
 # Export token must mirror src/export_token.py exactly (same secret, scope, and
@@ -234,25 +240,10 @@ def stage_screening(item_id, action_jwt):
     print(f"[e2e] PASS screening — status '{status}', details carry score + profile link")
 
 
-def stage_export(item_id, user_id, account_id):
-    """Prove the notification mutation works and the audit CSV round-trips (P1)."""
-    action_jwt = mint_action_jwt(user_id, account_id)
-    resp = httpx.post(
-        f"{APP_URL}/monday/export_action",
-        json={"payload": {"inboundFieldValues": {"itemId": {"itemId": item_id}}}},
-        headers={"Authorization": f"Bearer {action_jwt}"},
-        timeout=20.0,
-    )
-    if resp.status_code == 502:
-        raise SystemExit(
-            "export_action could not send the monday notification (502) — this is the "
-            "create_notification canary. Grant the app the notifications:write scope and "
-            "confirm the create_notification mutation, then re-run."
-        )
-    if resp.status_code != 200:
-        raise SystemExit(f"export_action returned {resp.status_code}: {resp.text}")
-    print("[e2e] PASS notification — export_action sent a notification (create_notification OK)")
-
+def stage_audit_csv(item_id, account_id):
+    """Round-trip the audit export (P1 audit log). Deterministic and faithful in
+    CI: we mint the export token with the same MONDAY_SIGNING_SECRET the app
+    verifies, so this exercises the real audit-log + export path."""
     token = mint_export_token(account_id)
     resp = httpx.get(f"{APP_URL}/audit/export", params={"token": token}, timeout=20.0)
     if resp.status_code != 200:
@@ -273,6 +264,30 @@ def stage_export(item_id, user_id, account_id):
             "[e2e] WARN audit export — CSV valid but our item is absent; "
             "is DATABASE_URL set on the deployment? (audit is skipped without it)"
         )
+
+
+def stage_notification(item_id, user_id, account_id):
+    """Opt-in, LIVE-only check: POST the export action, which makes the app call
+    monday create_notification. In CI the caller token is a personal token acting
+    as its own recipient, so this proves the mutation shape but NOT the real
+    notifications:write scope, and monday may reject a self-notification — hence
+    off by default. Confirm the scope with a real recipe run."""
+    action_jwt = mint_action_jwt(user_id, account_id)
+    resp = httpx.post(
+        f"{APP_URL}/monday/export_action",
+        json={"payload": {"inboundFieldValues": {"itemId": {"itemId": item_id}}}},
+        headers={"Authorization": f"Bearer {action_jwt}"},
+        timeout=20.0,
+    )
+    if resp.status_code == 502:
+        raise SystemExit(
+            "export_action could not send the monday notification (502). Grant the app the "
+            "notifications:write scope and confirm the create_notification mutation. Note a "
+            "personal token notifying itself can also be rejected — verify with a real recipe."
+        )
+    if resp.status_code != 200:
+        raise SystemExit(f"export_action returned {resp.status_code}: {resp.text}")
+    print("[e2e] PASS notification — export_action sent a notification (create_notification OK)")
 
 
 def main():
@@ -297,11 +312,18 @@ def main():
         # 4-5. Screen the vendor and assert the score-based result.
         stage_screening(item_id, mint_action_jwt(user_id, account_id))
 
-        # 6. Notification + audit export.
+        # 6. Audit export (deterministic), then the opt-in notification stage.
         if SKIP_EXPORT:
-            print("[e2e] SKIP export/notification stage (E2E_SKIP_EXPORT=1)")
+            print("[e2e] SKIP export section (E2E_SKIP_EXPORT=1)")
         else:
-            stage_export(item_id, user_id, account_id)
+            stage_audit_csv(item_id, account_id)
+            if RUN_NOTIFY:
+                stage_notification(item_id, user_id, account_id)
+            else:
+                print(
+                    "[e2e] SKIP notification stage — set E2E_RUN_NOTIFY=1 to run it "
+                    "(live-only: personal token self-notify may be rejected in CI)"
+                )
 
         print("[e2e] PASS — all stages green")
     finally:
