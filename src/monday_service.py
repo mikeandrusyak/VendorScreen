@@ -57,6 +57,30 @@ async def get_item_column_text(item_id, column_id, api_token):
     return None
 
 
+async def create_notification(user_id, item_id, text, api_token):
+    """Send a monday notification to a user, anchored to an item (target_type
+    Project = pulse/item). Used to deliver the audit-export download link and,
+    later, Critical-risk alerts. Anchoring to the triggering item gives the
+    notification a clickable context in monday's bell menu."""
+    query = """
+      mutation ($userId: ID!, $targetId: ID!, $text: String!) {
+        create_notification(
+          user_id: $userId,
+          target_id: $targetId,
+          target_type: Project,
+          text: $text
+        ) {
+          id
+        }
+      }
+    """
+    return await monday_request(
+        query,
+        {"userId": str(user_id), "targetId": str(item_id), "text": text},
+        api_token,
+    )
+
+
 async def update_vendor_record(
     *, board_id, item_id, status_column_id, details_column_id, risk_level, details, api_token
 ):

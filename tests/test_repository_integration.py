@@ -48,6 +48,58 @@ async def test_quota_allows_exactly_limit_then_blocks(monkeypatch):
         await db.close_db()
 
 
+async def test_record_and_list_events_roundtrip(monkeypatch):
+    # Proves the audit log persists a trimmed summary and reads it back newest
+    # first, scoped to the account.
+    monkeypatch.setenv("DATABASE_URL", TEST_DB_URL)
+    await db.init_db()
+
+    account_id = 900_000_000 + (uuid.uuid4().int % 1_000_000)
+    other_account = account_id + 1
+    pool = db.get_pool()
+    try:
+        await repository.record_event(
+            account_id=account_id,
+            board_id=123,
+            item_id=1,
+            vendor_name="First Vendor",
+            risk_level="Clear",
+        )
+        await repository.record_event(
+            account_id=account_id,
+            board_id=123,
+            item_id=2,
+            vendor_name="Bad Actor",
+            risk_level="Critical",
+            score=0.95,
+            match_id="ent-1",
+            match_caption="Bad Actor",
+        )
+        # A different account's row must not leak into this account's export.
+        await repository.record_event(
+            account_id=other_account,
+            board_id=999,
+            item_id=3,
+            vendor_name="Someone Else",
+            risk_level="Warning",
+        )
+
+        events = await repository.list_events(account_id)
+
+        assert [e["item_id"] for e in events] == [2, 1]  # newest first
+        assert events[0]["risk_level"] == "Critical"
+        assert events[0]["score"] == 0.95
+        assert events[0]["match_id"] == "ent-1"
+        assert all(e["vendor_name"] != "Someone Else" for e in events)
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM screening_events WHERE account_id = ANY($1::bigint[])",
+                [account_id, other_account],
+            )
+        await db.close_db()
+
+
 async def test_set_plan_upgrades_then_downgrades_account(monkeypatch):
     # Mirrors a monday subscription webhook: created (free -> pro), then
     # cancelled (pro -> free), and check_quota must reflect it immediately.

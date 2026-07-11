@@ -1,4 +1,6 @@
 import asyncio
+import csv
+import io
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -11,11 +13,17 @@ import jwt
 import sentry_sdk
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
 import db
+import export_token
 import repository
-from monday_service import get_item_column_text, get_item_name, update_vendor_record
+from monday_service import (
+    create_notification,
+    get_item_column_text,
+    get_item_name,
+    update_vendor_record,
+)
 from observability import init_sentry
 from sanctions_service import (
     RISK_LEVEL,
@@ -244,6 +252,139 @@ async def subscription_webhook(request: Request):
     return {}
 
 
+# Audit-log export, request half (P1). A recipe action the customer runs from
+# monday (e.g. a board button "Export screening audit"). It mints a short-lived
+# signed token and DMs the customer a download link via a monday notification —
+# the token is the one-time credential, so the browser download needs no session.
+# The export is scoped to the account in the JWT; the mapped item is only the
+# notification's anchor. See export_token.py for why this shape.
+@app.post("/monday/export_action")
+async def export_action(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    if body.get("challenge"):
+        return {"challenge": body["challenge"]}
+
+    auth = extract_auth(request)
+    if not auth:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+    account_id = auth.get("accountId")
+    user_id = auth.get("userId")
+    api_token = auth.get("shortLivedToken")
+
+    payload = body.get("payload") or {}
+    fields = payload.get("inboundFieldValues") or payload.get("inputFields") or {}
+    item_id = field_value(fields.get("itemId"), "itemId", "linkedPulseId", "id", "value")
+
+    # Export is per-tenant; without a signed account there's nothing to scope to.
+    if not account_id:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Export requires an authenticated monday account"},
+        )
+    # We deliver the link by notifying the user against the triggering item.
+    if not user_id or not item_id:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Export requires a userId and an itemId to notify"},
+        )
+
+    token = export_token.issue(account_id)
+    # request.base_url is the app's public URL as monday reached it, so the link
+    # is correct in any deploy without hardcoding a host.
+    link = f"{str(request.base_url).rstrip('/')}/audit/export?token={token}"
+    text = (
+        f"Your VendorScreen screening audit export is ready. Download it within 15 minutes: {link}"
+    )
+
+    try:
+        await create_notification(user_id, item_id, text, api_token)
+        log.info("[export] audit link sent to user %s (account %s)", user_id, account_id)
+    except Exception as err:
+        log.error("[export] failed to notify user %s: %s", user_id, err)
+        sentry_sdk.capture_exception(err)
+        return JSONResponse(
+            status_code=502, content={"error": "Could not send the export notification"}
+        )
+
+    return {}
+
+
+# Audit-log export, download half (P1). Reached by the tokenized link from the
+# notification above — the token both authenticates and scopes the download to a
+# single account, so this route needs no monday JWT. Streams CSV.
+@app.get("/audit/export")
+async def audit_export(token: str = ""):
+    account_id = export_token.verify(token)
+    if account_id is None:
+        return PlainTextResponse("Invalid or expired export link.", status_code=401)
+
+    events = await repository.list_events(account_id)
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            "created_at",
+            "board_id",
+            "item_id",
+            "vendor_name",
+            "risk_level",
+            "score",
+            "match_id",
+            "match_caption",
+        ]
+    )
+    for e in events:
+        created = e["created_at"]
+        writer.writerow(
+            [
+                created.isoformat() if hasattr(created, "isoformat") else created,
+                e["board_id"],
+                e["item_id"],
+                e["vendor_name"],
+                e["risk_level"],
+                e["score"],
+                e["match_id"],
+                e["match_caption"],
+            ]
+        )
+
+    filename = f"vendorscreen-audit-{account_id}.csv"
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+async def _record_audit(account_id, board_id, item_id, vendor_name, result):
+    """Append a screening outcome to the audit log (P1). Scoped to a real tenant:
+    skipped when the DB is off or the request has no account (dev), matching how
+    the export endpoint is scoped by account. Fail-open — an audit write must
+    never break or block a screening that already reached the board."""
+    if not (account_id and db.is_configured()):
+        return
+    try:
+        await repository.record_event(
+            account_id=account_id,
+            board_id=board_id,
+            item_id=item_id,
+            vendor_name=vendor_name,
+            risk_level=result["riskLevel"],
+            score=result.get("score"),
+            match_id=result.get("matchId"),
+            match_caption=result.get("matchCaption"),
+        )
+    except Exception as err:
+        log.error("[audit] failed to record event for item %s: %s", item_id, err)
+        sentry_sdk.capture_exception(err)
+
+
 async def process_vendor(
     board_id,
     item_id,
@@ -292,6 +433,15 @@ async def process_vendor(
                         ),
                         api_token=api_token,
                     )
+                    # Record the skip too — the audit trail should show the item
+                    # was received but not screened because the quota was spent.
+                    await _record_audit(
+                        account_id,
+                        board_id,
+                        item_id,
+                        None,
+                        {"riskLevel": RISK_LEVEL["UNAVAILABLE"]},
+                    )
                     return
 
             vendor_name = await get_item_name(item_id, api_token)
@@ -335,6 +485,7 @@ async def process_vendor(
             )
 
             log.info("[vendor] Monday.com updated for item %s", item_id)
+            await _record_audit(account_id, board_id, item_id, vendor_name, result)
         except SanctionsUnavailableError as err:
             # Screening could not run — don't lose it silently. Mark the board so
             # the client sees the check needs a re-run instead of a blank status.
@@ -353,6 +504,7 @@ async def process_vendor(
                     api_token=api_token,
                 )
                 log.info("[vendor] Marked item %s as '%s'", item_id, result["riskLevel"])
+                await _record_audit(account_id, board_id, item_id, vendor_name, result)
             except Exception as update_err:
                 log.error(
                     "[vendor] Could not write unavailable status for item %s: %s",

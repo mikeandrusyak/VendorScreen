@@ -25,8 +25,9 @@ Recipe trigger: "When an item is created"
               ├── sanctions_service: POST /match/default (name + country + schema)
               │     ├── scored candidates → Clear / Warning / Critical (score thresholds)
               │     └── retries 429/5xx/network; if still down → Screening Failed
-              └── monday_service.update_vendor_record()
-                    └── writes status by LABEL (create_labels_if_missing) + details text
+              ├── monday_service.update_vendor_record()
+              │     └── writes status by LABEL (create_labels_if_missing) + details text
+              └── repository.record_event()  → append outcome to audit log (if DB on)
 ```
 
 Because the status is written **by label** (not by a hard-coded index) and missing labels are auto-created, the app works on any customer board regardless of column order or naming.
@@ -41,9 +42,28 @@ The counter's period key is `YYYY-MM`, so allowances reset at the month boundary
 
 `POST /monday/subscription_webhook` receives subscription created/changed/renewed/cancelled events from monday's built-in Monetization and updates `accounts.plan` accordingly — a customer's plan is driven by what they're actually subscribed to on monday, not set manually in the database. Plan ids configured in Developer Center → Monetization must match the `PLAN_LIMITS` keys in `src/repository.py` (`pro`, `business`) exactly; an unrecognized plan id falls back to `free`. See [MONETIZATION.md](./MONETIZATION.md) for the full pricing model and setup steps.
 
+## Audit log & export
+
+When `DATABASE_URL` is set, every screening outcome is appended to an **append-only audit log** (`screening_events`) — one row per board write, with the risk level and a **trimmed match summary** (top match's score, entity id, and caption), never the raw provider payload. Over-limit and screening-failed outcomes are logged too, so the trail shows items that were received but not screened. Auditing is fail-open: a log write never blocks or fails a screening that already reached the board, and with the database disabled it is simply skipped.
+
+Customers export their own audit trail as CSV through a second recipe action, without VendorScreen needing a user-facing frontend or login:
+
+```
+Recipe action "Export screening audit"
+  └── Monday POSTs to /monday/export_action
+        ├── JWT verification (accountId + userId from the token)
+        ├── mints a short-lived (15 min) signed token scoped to the account
+        │     (signed with MONDAY_SIGNING_SECRET — no separate password store)
+        └── create_notification → DMs the user a link:
+              /audit/export?token=<signed token>
+                    └── verifies token → streams account-scoped CSV
+```
+
+The token **is** the one-time credential: because the app only ever holds a monday JWT during a recipe action, a browser download can't ride a session — so the signed, account-scoped, quickly-expiring token both authenticates and scopes the download. An invalid or expired link returns `401`.
+
 ### Capacity and scaling
 
-The default provider is Neon's free tier, which is sized by two independent limits: **compute** (scale-to-zero, so idle time is free — a good fit for spiky screening traffic) and **storage**. Storage is the one to watch as later phases add an audit log and ongoing-monitoring history: keep per-screening rows lean (store a trimmed match summary — top matches, scores, entity IDs — not the full raw provider payload) and the free tier stretches to well over a million rows. When real volume from monitoring outgrows it, upgrading is a **plan change in the Neon console — same project, same `DATABASE_URL`, no code change or data migration**. The single-env-var + repository layer keeps the provider swappable regardless.
+The default provider is Neon's free tier, which is sized by two independent limits: **compute** (scale-to-zero, so idle time is free — a good fit for spiky screening traffic) and **storage**. Storage is the one to watch now that the audit log and (later) ongoing-monitoring history accumulate: per-screening rows are kept lean (a trimmed match summary — top match, score, entity id — not the full raw provider payload), so the free tier stretches to well over a million rows. When real volume from monitoring outgrows it, upgrading is a **plan change in the Neon console — same project, same `DATABASE_URL`, no code change or data migration**. The single-env-var + repository layer keeps the provider swappable regardless.
 
 ---
 
@@ -114,7 +134,8 @@ The code does nothing until the integration recipe is configured. Field names be
    - `countryColumnId` — type **Country / Text Column** (picker), **optional** — when mapped, the vendor's country is sent to OpenSanctions `/match` to sharpen scoring and cut false positives
 4. **Action URL:** `https://<your-app>.monday.app/monday/execute_action`
 5. **Recipe sentence:** *"When an item is created, screen the vendor and set {statusColumn} with details in {detailsColumn}"* — this is where the customer maps their own columns.
-6. **Scopes:** `boards:read`, `boards:write`.
+6. **(Optional) Export action** *"Export screening audit"* — a button-triggered recipe with a single `itemId` input field, action URL `https://<your-app>.monday.app/monday/export_action`. Running it DMs the user a 15-minute CSV download link for their account's audit log. Requires `notifications:write` in addition to the scopes below.
+7. **Scopes:** `boards:read`, `boards:write` (add `notifications:write` for the export action).
 
 ---
 
