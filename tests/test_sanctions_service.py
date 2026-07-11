@@ -141,6 +141,33 @@ async def test_country_is_sent_in_query():
 
 
 @respx.mock
+async def test_default_schema_matches_people_and_companies():
+    # Default schema must be LegalEntity so a board of individuals is never
+    # silently missed (querying a person under "Company" returns nothing).
+    route = respx.post(MATCH_URL).mock(return_value=_mock([]))
+
+    await match_vendor("Acme")
+
+    import json
+
+    body = json.loads(route.calls.last.request.content)
+    assert body["queries"]["vendor"]["schema"] == "LegalEntity"
+
+
+@respx.mock
+async def test_schema_override_via_env(monkeypatch):
+    monkeypatch.setenv("MATCH_SCHEMA", "Person")
+    route = respx.post(MATCH_URL).mock(return_value=_mock([]))
+
+    await match_vendor("Jane Doe")
+
+    import json
+
+    body = json.loads(route.calls.last.request.content)
+    assert body["queries"]["vendor"]["schema"] == "Person"
+
+
+@respx.mock
 async def test_thresholds_are_env_tunable(monkeypatch):
     # Lowering the critical threshold promotes a mid-score sanction to Critical.
     monkeypatch.setenv("MATCH_SCORE_CRITICAL", "0.70")

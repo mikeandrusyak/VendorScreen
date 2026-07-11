@@ -15,10 +15,17 @@ RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 # We query the OpenSanctions /match endpoint (not /search) so we get a per-
 # candidate similarity `score` (0-1) and can send a structured entity (name +
-# country + type) instead of a bare text query — far fewer false positives.
-# The schema is the entity type matched against; vendors are companies by
-# default, override with MATCH_SCHEMA (e.g. "Person") for individual vendors.
-MATCH_SCHEMA_DEFAULT = "Company"
+# country) instead of a bare text query — far fewer false positives.
+#
+# The schema is the entity type matched against. We default to LegalEntity, the
+# FollowTheMoney parent of both Person and Company, so a single query surfaces
+# individuals AND organizations without the customer declaring which their board
+# holds. This matters for compliance: querying a person's name under the Company
+# schema returns NO results, so a wrong per-board type would silently miss a
+# sanctioned individual (a false Clear). LegalEntity sidesteps that entirely.
+# MATCH_SCHEMA can still narrow to a concrete schema (e.g. "Person") if a
+# deployment ever wants type-specific precision.
+MATCH_SCHEMA_DEFAULT = "LegalEntity"
 # Score thresholds gate the risk level so a weak namesake doesn't get flagged.
 # A sanction hit at/above CRITICAL is Critical; anything sanction/PEP-related
 # at/above WARNING (but below the critical bar) is a Warning worth review;

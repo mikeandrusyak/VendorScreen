@@ -76,7 +76,7 @@ Set these on the deployment (`mapps code:env --mode set --key ... --value ...`):
 | `OPENSANCTIONS_API_KEY` | screening | — |
 | `APP_ENV=production` | auth | enforces JWT verification |
 | `DATABASE_URL` | audit log + export + quotas | **without it the audit log is skipped** and the export CSV is header-only |
-| `MATCH_SCHEMA` / `MATCH_SCORE_CRITICAL` / `MATCH_SCORE_WARNING` | tuning | optional; defaults `Company` / `0.85` / `0.70` |
+| `MATCH_SCHEMA` / `MATCH_SCORE_CRITICAL` / `MATCH_SCORE_WARNING` | tuning | optional; defaults `LegalEntity` (matches people **and** companies) / `0.85` / `0.70` |
 
 ---
 
