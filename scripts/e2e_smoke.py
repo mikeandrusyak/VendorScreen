@@ -5,16 +5,30 @@ draft deployment is already running on its own URL, so we can exercise the full
 chain against it and only promote if it passes.
 
 What it verifies (the real product flow, not mocks):
-  1. the service booted            -> GET /health
-  2. create a test item            -> monday GraphQL
-  3. trigger the action endpoint   -> POST /monday/execute_action
-  4. the app screens the vendor    -> (app calls OpenSanctions itself)
-  5. the app writes the result     -> we read the status column back
+  1. the service booted             -> GET /health
+  2. resolve the caller's identity  -> monday `me { id account { id } }`
+  3. create a test item             -> monday GraphQL
+  4. trigger the action endpoint    -> POST /monday/execute_action
+  5. the app screens via /match     -> we read status + details back and assert
+                                        the score-based result (P1: /match)
+  6. the audit export round-trips   -> POST /monday/export_action (proves the
+                                        real create_notification mutation +
+                                        notifications:write scope), then
+                                        GET /audit/export streams the CSV
+                                        containing our screening (P1: audit log)
 
 We craft the request exactly as monday's Integration Framework would, so this
 does NOT depend on the recipe/automation being installed. The app verifies the
 Authorization JWT with MONDAY_SIGNING_SECRET, so we mint a matching JWT and put
-a real API token inside as `shortLivedToken` (what the app uses for GraphQL).
+a real API token inside as `shortLivedToken` (what the app uses for GraphQL),
+plus the `accountId` and `userId` claims the P1 features need (usage metering,
+audit scoping, and Critical alerts).
+
+Why POST /monday/export_action is the create_notification canary: the export
+action calls monday's `create_notification` (target_type Project) and returns
+502 if it fails, so a 200 proves the exact mutation and scope the Critical-risk
+alert path also depends on — which is otherwise fail-open and invisible from
+outside.
 
 Required env:
   APP_URL                base URL of the deployed draft (e.g. https://xxx.monday.app)
@@ -24,13 +38,23 @@ Required env:
   E2E_STATUS_COLUMN      status column id on the test board
   E2E_DETAILS_COLUMN     text column id on the test board
 Optional:
-  E2E_VENDOR_NAME        name to screen (default: a well-known sanctioned/PEP name)
+  E2E_VENDOR_NAME        name to screen (default: a well-known sanctioned name,
+                         expected to come back Critical)
+  E2E_EXPECT_LEVEL       expected risk level for that name (default: Critical)
+  E2E_COUNTRY_COLUMN     country/text column id — when set, the app is told to
+                         read it (exercises the /match country refinement)
+  E2E_COUNTRY_VALUE      value written to that column before screening (default Russia)
+  E2E_ACCOUNT_ID         override the account id (default: derived from the token)
+  E2E_USER_ID            override the alert recipient (default: derived from token)
+  E2E_SKIP_EXPORT        set to "1" to skip the export/notification stage (e.g.
+                         before notifications:write is granted or DATABASE_URL set)
   E2E_KEEP_ITEMS         how many recent test items to keep on the board (default 20)
 
 Test items are NOT deleted after each run — recent history is kept for debugging.
 Instead we prune to the newest E2E_KEEP_ITEMS so the board stays bounded.
 """
 
+import datetime as dt
 import json
 import os
 import sys
@@ -46,7 +70,15 @@ BOARD_ID = os.environ["E2E_BOARD_ID"]
 STATUS_COL = os.environ["E2E_STATUS_COLUMN"]
 DETAILS_COL = os.environ["E2E_DETAILS_COLUMN"]
 VENDOR = os.environ.get("E2E_VENDOR_NAME", "Vladimir Putin")
+EXPECT_LEVEL = os.environ.get("E2E_EXPECT_LEVEL", "Critical")
+COUNTRY_COL = os.environ.get("E2E_COUNTRY_COLUMN")
+COUNTRY_VALUE = os.environ.get("E2E_COUNTRY_VALUE", "Russia")
+SKIP_EXPORT = os.environ.get("E2E_SKIP_EXPORT") == "1"
 KEEP_ITEMS = int(os.environ.get("E2E_KEEP_ITEMS", "20"))
+
+# Export token must mirror src/export_token.py exactly (same secret, scope, and
+# claim name) so the deployed app's verify() accepts what we mint here.
+EXPORT_SCOPE = "audit-export"
 
 MONDAY_API = "https://api.monday.com/v2"
 VALID_LEVELS = {"Clear", "Warning", "Critical"}
@@ -68,19 +100,62 @@ def gql(query, variables):
     return data["data"]
 
 
+def resolve_identity():
+    """The account + user the JWT should carry. account_id scopes usage metering
+    and the audit log; user_id is the Critical-alert recipient. Both come from
+    the token owner unless overridden."""
+    data = gql("query { me { id account { id } } }", {})
+    me = data["me"]
+    account_id = os.environ.get("E2E_ACCOUNT_ID") or me["account"]["id"]
+    user_id = os.environ.get("E2E_USER_ID") or me["id"]
+    return str(user_id), str(account_id)
+
+
 def create_item():
     query = "mutation ($b: ID!, $n: String!) { create_item (board_id: $b, item_name: $n) { id } }"
     return gql(query, {"b": BOARD_ID, "n": VENDOR})["create_item"]["id"]
 
 
-def read_status(item_id):
+def set_country(item_id):
     query = (
-        "query ($i: [ID!]) { items (ids: $i) { "
-        f'column_values (ids: ["{STATUS_COL}"]) {{ text }} }} }}'
+        "mutation ($b: ID!, $i: ID!, $c: String!, $v: String!) { "
+        "change_simple_column_value (board_id: $b, item_id: $i, column_id: $c, value: $v) { id } }"
+    )
+    gql(query, {"b": BOARD_ID, "i": item_id, "c": COUNTRY_COL, "v": COUNTRY_VALUE})
+
+
+def read_columns(item_id, column_ids):
+    ids = ", ".join(f'"{c}"' for c in column_ids)
+    query = (
+        f"query ($i: [ID!]) {{ items (ids: $i) {{ column_values (ids: [{ids}]) {{ id text }} }} }}"
     )
     items = gql(query, {"i": [item_id]})["items"]
     values = items[0]["column_values"] if items else []
-    return values[0]["text"] if values else None
+    return {v["id"]: v["text"] for v in values}
+
+
+def mint_action_jwt(user_id, account_id):
+    """A JWT shaped like monday's action request: the app reads shortLivedToken
+    for GraphQL, accountId for metering/audit, userId for the alert recipient."""
+    return jwt.encode(
+        {"shortLivedToken": TOKEN, "accountId": int(account_id), "userId": int(user_id)},
+        SIGNING_SECRET,
+        algorithm="HS256",
+    )
+
+
+def mint_export_token(account_id):
+    now = dt.datetime.now(dt.UTC)
+    return jwt.encode(
+        {
+            "accountId": int(account_id),
+            "scope": EXPORT_SCOPE,
+            "exp": now + dt.timedelta(seconds=900),
+            "iat": now,
+        },
+        SIGNING_SECRET,
+        algorithm="HS256",
+    )
 
 
 def prune_old_items(keep):
@@ -109,6 +184,97 @@ def prune_old_items(keep):
         print(f"[prune] could not prune old items: {err}")
 
 
+def stage_screening(item_id, action_jwt):
+    """Fire the action endpoint and assert the score-based result lands (P1)."""
+    fields = {
+        "boardId": {"boardId": BOARD_ID},
+        "itemId": {"itemId": item_id},
+        "statusColumnId": {"columnId": STATUS_COL},
+        "detailsColumnId": {"columnId": DETAILS_COL},
+    }
+    if COUNTRY_COL:
+        fields["countryColumnId"] = {"columnId": COUNTRY_COL}
+
+    resp = httpx.post(
+        f"{APP_URL}/monday/execute_action",
+        json={"payload": {"inboundFieldValues": fields}},
+        headers={"Authorization": f"Bearer {action_jwt}"},
+        timeout=20.0,
+    )
+    if resp.status_code != 200:
+        raise SystemExit(f"action endpoint returned {resp.status_code}: {resp.text}")
+    print("[e2e] action accepted; waiting for async screening to write back...")
+
+    deadline = time.time() + POLL_TIMEOUT_S
+    status = None
+    while time.time() < deadline:
+        status = read_columns(item_id, [STATUS_COL]).get(STATUS_COL)
+        if status in VALID_LEVELS:
+            break
+        time.sleep(POLL_INTERVAL_S)
+
+    if status not in VALID_LEVELS:
+        raise SystemExit(
+            f"expected a risk level {sorted(VALID_LEVELS)} within {POLL_TIMEOUT_S}s, got {status!r}"
+        )
+    if status != EXPECT_LEVEL:
+        raise SystemExit(
+            f"expected '{VENDOR}' to screen as {EXPECT_LEVEL!r}, got {status!r} "
+            "(set E2E_EXPECT_LEVEL if the reference list changed)"
+        )
+
+    details = read_columns(item_id, [DETAILS_COL]).get(DETAILS_COL) or ""
+    # A flagged result carries the /match score and the OpenSanctions profile
+    # link — this is what proves PR1 (score) actually ran, not the old /search.
+    if status in {"Warning", "Critical"}:
+        if "% match" not in details:
+            raise SystemExit(f"expected a '% match' score in details, got: {details!r}")
+        if "opensanctions.org" not in details:
+            raise SystemExit(f"expected an OpenSanctions profile link in details, got: {details!r}")
+    print(f"[e2e] PASS screening — status '{status}', details carry score + profile link")
+
+
+def stage_export(item_id, user_id, account_id):
+    """Prove the notification mutation works and the audit CSV round-trips (P1)."""
+    action_jwt = mint_action_jwt(user_id, account_id)
+    resp = httpx.post(
+        f"{APP_URL}/monday/export_action",
+        json={"payload": {"inboundFieldValues": {"itemId": {"itemId": item_id}}}},
+        headers={"Authorization": f"Bearer {action_jwt}"},
+        timeout=20.0,
+    )
+    if resp.status_code == 502:
+        raise SystemExit(
+            "export_action could not send the monday notification (502) — this is the "
+            "create_notification canary. Grant the app the notifications:write scope and "
+            "confirm the create_notification mutation, then re-run."
+        )
+    if resp.status_code != 200:
+        raise SystemExit(f"export_action returned {resp.status_code}: {resp.text}")
+    print("[e2e] PASS notification — export_action sent a notification (create_notification OK)")
+
+    token = mint_export_token(account_id)
+    resp = httpx.get(f"{APP_URL}/audit/export", params={"token": token}, timeout=20.0)
+    if resp.status_code != 200:
+        raise SystemExit(f"audit export returned {resp.status_code}: {resp.text}")
+    ctype = resp.headers.get("content-type", "")
+    if not ctype.startswith("text/csv"):
+        raise SystemExit(f"expected a text/csv export, got content-type {ctype!r}")
+    body = resp.text
+    header = "created_at,board_id,item_id,vendor_name,risk_level,score,match_id,match_caption"
+    if header not in body:
+        raise SystemExit("audit CSV is missing the expected header row")
+    # The screening we just ran should appear — unless the app has no
+    # DATABASE_URL (audit disabled), in which case the CSV is header-only.
+    if str(item_id) in body:
+        print("[e2e] PASS audit export — CSV contains the screening we just ran")
+    else:
+        print(
+            "[e2e] WARN audit export — CSV valid but our item is absent; "
+            "is DATABASE_URL set on the deployment? (audit is skipped without it)"
+        )
+
+
 def main():
     # 1. Service booted and secrets loaded?
     health = httpx.get(f"{APP_URL}/health", timeout=15.0)
@@ -116,48 +282,28 @@ def main():
         raise SystemExit(f"health check failed: {health.status_code} {health.text}")
     print("[smoke] health OK")
 
-    # 2. Seed a test item.
+    # 2. Who are we acting as? (scopes metering, audit, and alerts)
+    user_id, account_id = resolve_identity()
+    print(f"[e2e] acting as user {user_id}, account {account_id}")
+
+    # 3. Seed a test item.
     item_id = create_item()
     print(f'[e2e] created item {item_id} ("{VENDOR}") on board {BOARD_ID}')
+    if COUNTRY_COL:
+        set_country(item_id)
+        print(f"[e2e] set country column {COUNTRY_COL} = {COUNTRY_VALUE!r}")
 
     try:
-        # 3. Call the action endpoint exactly like monday would.
-        auth = jwt.encode({"shortLivedToken": TOKEN}, SIGNING_SECRET, algorithm="HS256")
-        payload = {
-            "payload": {
-                "inboundFieldValues": {
-                    "boardId": {"boardId": BOARD_ID},
-                    "itemId": {"itemId": item_id},
-                    "statusColumnId": {"columnId": STATUS_COL},
-                    "detailsColumnId": {"columnId": DETAILS_COL},
-                }
-            }
-        }
-        resp = httpx.post(
-            f"{APP_URL}/monday/execute_action",
-            json=payload,
-            headers={"Authorization": f"Bearer {auth}"},
-            timeout=20.0,
-        )
-        if resp.status_code != 200:
-            raise SystemExit(f"action endpoint returned {resp.status_code}: {resp.text}")
-        print("[e2e] action accepted; waiting for async screening to write back...")
+        # 4-5. Screen the vendor and assert the score-based result.
+        stage_screening(item_id, mint_action_jwt(user_id, account_id))
 
-        # 4. The screening runs in a background task; poll the column.
-        deadline = time.time() + POLL_TIMEOUT_S
-        status = None
-        while time.time() < deadline:
-            status = read_status(item_id)
-            if status in VALID_LEVELS:
-                break
-            time.sleep(POLL_INTERVAL_S)
+        # 6. Notification + audit export.
+        if SKIP_EXPORT:
+            print("[e2e] SKIP export/notification stage (E2E_SKIP_EXPORT=1)")
+        else:
+            stage_export(item_id, user_id, account_id)
 
-        if status not in VALID_LEVELS:
-            raise SystemExit(
-                f"expected a risk level {sorted(VALID_LEVELS)} within "
-                f"{POLL_TIMEOUT_S}s, got {status!r}"
-            )
-        print(f"[e2e] PASS — board updated with '{status}'")
+        print("[e2e] PASS — all stages green")
     finally:
         # Keep recent history for debugging; just bound the board size.
         prune_old_items(KEEP_ITEMS)
@@ -167,5 +313,8 @@ if __name__ == "__main__":
     try:
         main()
     except SystemExit as err:
-        print(f"[e2e] FAIL — {err}")
-        sys.exit(1)
+        # SystemExit with an int (0) is a clean exit; only strings are failures.
+        if isinstance(err.code, str):
+            print(f"[e2e] FAIL — {err}")
+            sys.exit(1)
+        raise

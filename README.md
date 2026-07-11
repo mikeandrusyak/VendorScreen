@@ -175,3 +175,7 @@ mapps code:push
 After deploy, set the recipe **Action URL** in Developer Center to the new `*.monday.app` URL + `/monday/execute_action`.
 
 Re-run `mapps code:push` whenever you change the code — each push creates a new version that must go through review before customers receive it.
+
+### Smoke test before promoting
+
+After `mapps code:push`, run the end-to-end smoke test against the **draft** URL before promoting it to customers. It exercises the real product flow — `/match` scoring, the audit log + CSV export, and the `create_notification` mutation the Critical alert depends on. See **[SMOKE_TEST.md](./SMOKE_TEST.md)** for the test-board setup, the Developer Center feature/recipe changes (including the `notifications:write` scope and the export action), and how to run [`scripts/e2e_smoke.py`](./scripts/e2e_smoke.py).
