@@ -88,10 +88,12 @@ def test_valid_payload_enqueues_and_returns_empty(monkeypatch):
         api_token,
         account_id=None,
         country_column_id=None,
+        user_id=None,
     ):
         seen["args"] = (board_id, item_id, status_column_id, details_column_id, api_token)
         seen["account_id"] = account_id
         seen["country_column_id"] = country_column_id
+        seen["user_id"] = user_id
 
     monkeypatch.setattr(main, "process_vendor", fake_process)
 

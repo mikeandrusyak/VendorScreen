@@ -27,7 +27,8 @@ Recipe trigger: "When an item is created"
               │     └── retries 429/5xx/network; if still down → Screening Failed
               ├── monday_service.update_vendor_record()
               │     └── writes status by LABEL (create_labels_if_missing) + details text
-              └── repository.record_event()  → append outcome to audit log (if DB on)
+              ├── repository.record_event()  → append outcome to audit log (if DB on)
+              └── if Critical → create_notification() alerts the automation owner
 ```
 
 Because the status is written **by label** (not by a hard-coded index) and missing labels are auto-created, the app works on any customer board regardless of column order or naming.
@@ -60,6 +61,10 @@ Recipe action "Export screening audit"
 ```
 
 The token **is** the one-time credential: because the app only ever holds a monday JWT during a recipe action, a browser download can't ride a session — so the signed, account-scoped, quickly-expiring token both authenticates and scopes the download. An invalid or expired link returns `401`.
+
+## Critical-risk alerts
+
+When a vendor screens as **Critical**, VendorScreen sends the automation owner a monday notification (`create_notification`, anchored to the item) so a hard sanction hit surfaces in the bell menu immediately, not only as a column change. Only Critical fires an alert — Clear and Warning stay silent to keep the bell free of noise. The recipient is the `userId` from the recipe action's JWT (absent in dev, so alerting is skipped there). Alerting is fail-open: a notification failure is logged and reported to Sentry but never breaks or blocks the screening that already reached the board. Requires the `notifications:write` scope (the same scope the export action needs).
 
 ### Capacity and scaling
 
