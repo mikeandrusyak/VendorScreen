@@ -1,10 +1,18 @@
 name: Deploy to monday code
 
+# Runs the full test -> deploy -> smoke chain on both PRs and merges to main, so
+# a change is verified end-to-end against a real (draft) deploy BEFORE it lands.
+# `test` runs for every event (it's the required check); `deploy`/`smoke` are
+# gated to same-repo, non-draft PRs and pushes (see the deploy job's `if`).
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
 
-# Prevent overlapping deploys if commits land in quick succession.
+# One GLOBAL group on purpose: monday has a single shared draft version, so every
+# deploy (any PR or main) must serialize onto it — never overlap. cancel-in-
+# progress:false lets queued runs finish rather than clobbering a deploy midway.
 concurrency:
   group: deploy-monday
   cancel-in-progress: false
@@ -49,6 +57,12 @@ jobs:
 
   deploy:
     needs: test
+    # Deploy on pushes, and on PRs only when they can access secrets (same-repo,
+    # not a fork) and aren't a draft/WIP. Fork or draft PRs still run `test`.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     outputs:
       app_url: ${{ steps.deploy.outputs.app_url }}
@@ -156,4 +170,14 @@ jobs:
           E2E_STATUS_COLUMN: ${{ vars.E2E_STATUS_COLUMN }}
           E2E_DETAILS_COLUMN: ${{ vars.E2E_DETAILS_COLUMN }}
           E2E_VENDOR_NAME: ${{ vars.E2E_VENDOR_NAME }}
+          # Optional country column — exercises the /match country refinement.
+          E2E_COUNTRY_COLUMN: ${{ vars.E2E_COUNTRY_COLUMN }}
+          # E2E_SKIP_EXPORT=1 skips the whole export section (audit CSV +
+          # notification) — e.g. until DATABASE_URL is set on the deploy.
+          E2E_SKIP_EXPORT: ${{ vars.E2E_SKIP_EXPORT }}
+          # The notification stage is opt-in and live-only (a personal token
+          # notifying itself may be rejected in CI, and it doesn't exercise the
+          # real notifications:write scope). Default off; set E2E_RUN_NOTIFY=1
+          # only if you knowingly want CI to attempt it.
+          E2E_RUN_NOTIFY: ${{ vars.E2E_RUN_NOTIFY }}
         run: python scripts/e2e_smoke.py

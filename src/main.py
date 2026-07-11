@@ -163,6 +163,9 @@ async def execute_action(request: Request):
     # Tenant key for usage limits. Present on real Monday JWTs; absent in dev
     # (no signed token) — enforcement is then skipped for that request.
     account_id = auth.get("accountId")
+    # User who owns the automation — the recipient of Critical-risk alerts.
+    # Absent in dev (no signed token); alerting is then skipped.
+    user_id = auth.get("userId")
 
     if not board_id or not item_id or not status_column_id or not details_column_id:
         return JSONResponse(
@@ -186,6 +189,7 @@ async def execute_action(request: Request):
             api_token,
             account_id=account_id,
             country_column_id=country_column_id,
+            user_id=user_id,
         )
     )
     background_tasks.add(task)
@@ -385,6 +389,26 @@ async def _record_audit(account_id, board_id, item_id, vendor_name, result):
         sentry_sdk.capture_exception(err)
 
 
+async def _alert_critical(user_id, item_id, vendor_name, result, api_token):
+    """Send a monday notification to the automation owner when a vendor screens
+    as Critical (P1). Only Critical fires an alert — Clear/Warning stay silent so
+    the bell isn't noise. Needs a userId (the alert recipient); absent in dev, so
+    alerting is then skipped. Fail-open — a notification failure must never break
+    or block a screening that already reached the board."""
+    if not user_id or result["riskLevel"] != RISK_LEVEL["CRITICAL"]:
+        return
+    text = (
+        f"⚠️ VendorScreen: '{vendor_name}' screened as CRITICAL and needs review. "
+        f"{result['details']}"
+    )
+    try:
+        await create_notification(user_id, item_id, text, api_token)
+        log.info("[alert] Critical alert sent to user %s for item %s", user_id, item_id)
+    except Exception as err:
+        log.error("[alert] failed to notify user %s for item %s: %s", user_id, item_id, err)
+        sentry_sdk.capture_exception(err)
+
+
 async def process_vendor(
     board_id,
     item_id,
@@ -393,6 +417,7 @@ async def process_vendor(
     api_token,
     account_id=None,
     country_column_id=None,
+    user_id=None,
 ):
     async with vendor_semaphore:
         try:
@@ -486,6 +511,7 @@ async def process_vendor(
 
             log.info("[vendor] Monday.com updated for item %s", item_id)
             await _record_audit(account_id, board_id, item_id, vendor_name, result)
+            await _alert_critical(user_id, item_id, vendor_name, result, api_token)
         except SanctionsUnavailableError as err:
             # Screening could not run — don't lose it silently. Mark the board so
             # the client sees the check needs a re-run instead of a blank status.

@@ -27,7 +27,8 @@ Recipe trigger: "When an item is created"
               │     └── retries 429/5xx/network; if still down → Screening Failed
               ├── monday_service.update_vendor_record()
               │     └── writes status by LABEL (create_labels_if_missing) + details text
-              └── repository.record_event()  → append outcome to audit log (if DB on)
+              ├── repository.record_event()  → append outcome to audit log (if DB on)
+              └── if Critical → create_notification() alerts the automation owner
 ```
 
 Because the status is written **by label** (not by a hard-coded index) and missing labels are auto-created, the app works on any customer board regardless of column order or naming.
@@ -61,6 +62,10 @@ Recipe action "Export screening audit"
 
 The token **is** the one-time credential: because the app only ever holds a monday JWT during a recipe action, a browser download can't ride a session — so the signed, account-scoped, quickly-expiring token both authenticates and scopes the download. An invalid or expired link returns `401`.
 
+## Critical-risk alerts
+
+When a vendor screens as **Critical**, VendorScreen sends the automation owner a monday notification (`create_notification`, anchored to the item) so a hard sanction hit surfaces in the bell menu immediately, not only as a column change. Only Critical fires an alert — Clear and Warning stay silent to keep the bell free of noise. The recipient is the `userId` from the recipe action's JWT (absent in dev, so alerting is skipped there). Alerting is fail-open: a notification failure is logged and reported to Sentry but never breaks or blocks the screening that already reached the board. Requires the `notifications:write` scope (the same scope the export action needs).
+
 ### Capacity and scaling
 
 The default provider is Neon's free tier, which is sized by two independent limits: **compute** (scale-to-zero, so idle time is free — a good fit for spiky screening traffic) and **storage**. Storage is the one to watch now that the audit log and (later) ongoing-monitoring history accumulate: per-screening rows are kept lean (a trimmed match summary — top match, score, entity id — not the full raw provider payload), so the free tier stretches to well over a million rows. When real volume from monitoring outgrows it, upgrading is a **plan change in the Neon console — same project, same `DATABASE_URL`, no code change or data migration**. The single-env-var + repository layer keeps the provider swappable regardless.
@@ -79,7 +84,7 @@ Only **secrets** live in the environment. Board and column IDs come from the rec
 | `MONDAY_API_TOKEN` | **local dev only** | Personal API token used only when no `Authorization` header is present (dev mode). Not needed in production — the token comes from the JWT. |
 | `SENTRY_DSN` | **optional** | Enables Sentry error tracking when set. Unset = tracking disabled, app runs unchanged. PII is never sent (`send_default_pii=False`). |
 | `SENTRY_TRACES_SAMPLE_RATE` | **optional** | Performance tracing sample rate (e.g. `0.1`). Defaults to `0` (errors only). |
-| `MATCH_SCHEMA` | **optional** | OpenSanctions entity type matched against in `/match`. Defaults to `Company` (vendors); set `Person` for boards of individual vendors. |
+| `MATCH_SCHEMA` | **optional** | OpenSanctions entity type matched against in `/match`. Defaults to `LegalEntity`, which matches **both** individuals and organizations — so a board of people is never silently missed (querying a person's name under `Company` returns nothing). Narrow to a concrete schema (e.g. `Person`) only if a deployment wants type-specific precision. |
 | `MATCH_SCORE_CRITICAL` | **optional** | Minimum candidate score (0–1) for a sanction hit to be **Critical**. Default `0.85`. |
 | `MATCH_SCORE_WARNING` | **optional** | Score floor (0–1) below which candidates are treated as noise; sanction/PEP hits at/above it (but below critical) are **Warning**. Default `0.70`. |
 | `DATABASE_URL` | **optional** | Postgres connection string (e.g. [Neon](https://neon.com)). Enables per-account monthly usage limits. Unset = limits disabled, app runs unchanged. Migrations apply automatically on startup. |
@@ -170,3 +175,7 @@ mapps code:push
 After deploy, set the recipe **Action URL** in Developer Center to the new `*.monday.app` URL + `/monday/execute_action`.
 
 Re-run `mapps code:push` whenever you change the code — each push creates a new version that must go through review before customers receive it.
+
+### Smoke test before promoting
+
+After `mapps code:push`, run the end-to-end smoke test against the **draft** URL before promoting it to customers. It exercises the real product flow — `/match` scoring, the audit log + CSV export, and the `create_notification` mutation the Critical alert depends on. See **[SMOKE_TEST.md](./SMOKE_TEST.md)** for the test-board setup, the Developer Center feature/recipe changes (including the `notifications:write` scope and the export action), and how to run [`scripts/e2e_smoke.py`](./scripts/e2e_smoke.py).

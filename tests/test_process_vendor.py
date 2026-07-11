@@ -194,6 +194,77 @@ async def test_audit_failure_does_not_break_screening(monkeypatch):
     assert "err" in captured  # audit failure was reported, not raised
 
 
+def _capture_notifications(monkeypatch):
+    """Patch create_notification and return the list of calls it received."""
+    sent = []
+
+    async def fake_notify(user_id, item_id, text, api_token):
+        sent.append({"user_id": user_id, "item_id": item_id, "text": text})
+
+    monkeypatch.setattr(main, "create_notification", fake_notify)
+    return sent
+
+
+async def test_critical_result_notifies_owner(monkeypatch):
+    monkeypatch.setattr(main.db, "is_configured", lambda: False)
+    _stub_screening(
+        monkeypatch,
+        name="Bad Actor",
+        result={"riskLevel": "Critical", "details": "sanction hit"},
+    )
+    sent = _capture_notifications(monkeypatch)
+
+    await main.process_vendor("b", "item-9", "s", "d", "tok", user_id=42)
+
+    assert len(sent) == 1
+    assert sent[0]["user_id"] == 42
+    assert sent[0]["item_id"] == "item-9"
+    assert "CRITICAL" in sent[0]["text"]
+    assert "Bad Actor" in sent[0]["text"]
+
+
+async def test_clear_and_warning_do_not_notify(monkeypatch):
+    monkeypatch.setattr(main.db, "is_configured", lambda: False)
+    for level in ("Clear", "Warning"):
+        _stub_screening(monkeypatch, result={"riskLevel": level, "details": "x"})
+        sent = _capture_notifications(monkeypatch)
+
+        await main.process_vendor("b", "i", "s", "d", "tok", user_id=42)
+
+        assert sent == []
+
+
+async def test_critical_without_user_id_does_not_notify(monkeypatch):
+    # Dev requests (no signed JWT) have no userId — nobody to alert.
+    monkeypatch.setattr(main.db, "is_configured", lambda: False)
+    _stub_screening(monkeypatch, result={"riskLevel": "Critical", "details": "hit"})
+    sent = _capture_notifications(monkeypatch)
+
+    await main.process_vendor("b", "i", "s", "d", "tok", user_id=None)
+
+    assert sent == []
+
+
+async def test_alert_failure_does_not_break_screening(monkeypatch):
+    # A notification failure must not fail the screening that already landed.
+    monkeypatch.setattr(main.db, "is_configured", lambda: False)
+    calls = _stub_screening(monkeypatch, result={"riskLevel": "Critical", "details": "hit"})
+
+    async def boom(user_id, item_id, text, api_token):
+        raise RuntimeError("monday notifications down")
+
+    monkeypatch.setattr(main, "create_notification", boom)
+    captured = {}
+    monkeypatch.setattr(
+        main.sentry_sdk, "capture_exception", lambda err: captured.setdefault("err", err)
+    )
+
+    await main.process_vendor("b", "i", "s", "d", "tok", user_id=42)
+
+    assert calls["update"]["risk_level"] == "Critical"  # screening still completed
+    assert "err" in captured  # alert failure reported, not raised
+
+
 async def test_no_account_id_skips_quota_entirely(monkeypatch):
     # Dev requests have no account — quota must not even be consulted.
     monkeypatch.setattr(main.db, "is_configured", lambda: True)
