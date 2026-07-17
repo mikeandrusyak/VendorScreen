@@ -1,0 +1,59 @@
+{
+  "skill_name": "monday-platform",
+  "evals": [
+    {
+      "id": 1,
+      "name": "add-column-and-screening-logic",
+      "prompt": "We want to add two new columns to the vendor board: an 'Ongoing Monitoring' checkbox column and a 'Last Flagged' date column. Update src/monday_service.py so that whenever a screening comes back Critical, in addition to writing the status/details columns we already write, it also stamps today's date into the new 'Last Flagged' date column. Show me the column value JSON shapes and the code change.",
+      "expected_output": "Correct column_values JSON for checkbox (string \"true\"/\"false\", not boolean) and date ({\"date\": \"YYYY-MM-DD\"}) column types, using change_multiple_column_values with a JSON-stringified column_values argument, wired into the existing monday_service.py update path without hardcoding a column id that doesn't exist yet.",
+      "files": [],
+      "assertions": [
+        {"id": "uses_change_multiple_column_values", "text": "Uses change_multiple_column_values (or explicitly justifies a different documented mutation) rather than a fabricated mutation name"},
+        {"id": "correct_checkbox_json_shape", "text": "Checkbox column value is written as the string {\"checked\": \"true\"}/{\"checked\": \"false\"}, not a bare JSON boolean"},
+        {"id": "correct_date_json_shape", "text": "Date column value is written as {\"date\": \"YYYY-MM-DD\"} (optionally with \"time\"), not a bare string or wrong key"},
+        {"id": "column_values_json_stringified", "text": "column_values is passed as a JSON-encoded string, not an inline/raw nested GraphQL object"},
+        {"id": "no_fabricated_column_ids", "text": "Does not hardcode a specific id for the new 'Last Flagged' column as if it already exists on every customer board; treats it as configurable, consistent with the app's existing recipe-input-field pattern"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "manual-rescreen-action",
+      "prompt": "We want to add a second custom action to the monday app: 'Re-screen this vendor now', triggered manually by a user (e.g. via a button column) rather than by the automatic on-create trigger. Walk me through what to configure in the Developer Center and what the FastAPI endpoint needs to do, including how it should verify the request is really from monday.",
+      "expected_output": "Correctly identifies registering a new Automation block (action type) with its own Run URL and input fields, verifying the Authorization JWT with the app's Signing Secret (not Client Secret), reading the mapped board/item id from payload.inboundFieldValues, responding within ~1 minute or using the async-action callback pattern for slower work, and not relying on a challenge echo as the actual authenticity check.",
+      "files": [],
+      "assertions": [
+        {"id": "mentions_signing_secret_not_client_secret", "text": "Explicitly identifies the Signing Secret (not the Client Secret) as correct for verifying this action's inbound requests"},
+        {"id": "mentions_inboundFieldValues", "text": "References payload.inboundFieldValues (or inputFields) as where the customer's field mapping (board id / item id) arrives at runtime"},
+        {"id": "mentions_timing_contract", "text": "Notes the ~1 minute synchronous response window and/or the async-action callback pattern for work that might run longer"},
+        {"id": "does_not_rely_on_challenge_as_authn", "text": "Does not claim the {\"challenge\": ...} echo is the security/authenticity mechanism for this action endpoint"},
+        {"id": "registers_as_new_action_block", "text": "Describes registering a new, separate Automation block (action type) in the Developer Center distinct from the existing screening action"}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "enterprise-pricing-tier",
+      "prompt": "We want to raise VendorScreen's Business plan price and add a new Enterprise tier at $799/mo with unlimited screenings. What has to change in the monday Developer Center Monetization tab, and what has to change in our code so the plan sync (subscription_webhook -> accounts.plan) keeps working correctly for both the changed Business plan and the new Enterprise plan?",
+      "expected_output": "Notes that the plan id typed into the Developer Center is a developer-chosen, case-sensitive string that must exactly match the plan key used in code (e.g. PLAN_LIMITS); that monday does not automatically enforce the plan and the app must keep checking quota itself; and recommends failing an unrecognized plan_id to the most restrictive tier rather than granting full access.",
+      "files": [],
+      "assertions": [
+        {"id": "plan_id_case_sensitive_match", "text": "States the Developer Center plan id must exactly (case-sensitive) match the plan key used in code"},
+        {"id": "mentions_runtime_enforcement_not_automatic", "text": "Notes monday does not automatically enforce/gate plan access — the app must verify/enforce it at runtime"},
+        {"id": "mentions_fallback_to_restrictive_on_unrecognized_plan", "text": "Recommends falling back to the most restrictive tier (not granting full access) on an unrecognized plan_id"},
+        {"id": "no_fabricated_revenue_share_numbers", "text": "If revenue share is mentioned, cites the correct $200,000 lifetime revenue threshold and 85%/15% split rather than inventing different numbers"}
+      ]
+    },
+    {
+      "id": 4,
+      "name": "webhooks-and-storage-migration",
+      "prompt": "Instead of only screening on item-creation via our automation action, we also want to react in near-real-time when someone manually edits the country column on an existing vendor item (to re-trigger screening). Should we use monday's create_webhook API for that? Also - could we replace our Postgres usage_counters table with monday's built-in Storage API to simplify hosting?",
+      "expected_output": "Recommends create_webhook with an appropriate column-change event, correctly describes the challenge/echo handshake required specifically for that registration flow, and gives a reasoned (not shallow) recommendation on Storage API vs Postgres that accounts for Storage's per-key size/key-length limits and lack of relational/audit-log querying.",
+      "files": [],
+      "assertions": [
+        {"id": "recommends_valid_webhook_event", "text": "Identifies a real, documented webhook event (e.g. change_column_value or change_specific_column_value) rather than a fabricated event name"},
+        {"id": "mentions_challenge_handshake_for_create_webhook", "text": "Correctly describes the {\"challenge\": ...} echo requirement as belonging to create_webhook registration"},
+        {"id": "storage_api_tradeoff_reasoned", "text": "Gives a reasoned Storage-API-vs-Postgres recommendation referencing at least one real constraint (e.g. 6MB/key, 256-char key limit, per-account segregation, lack of relational querying) rather than a shallow yes/no"},
+        {"id": "storage_shared_flag_correct", "text": "If the Storage API's shared flag is mentioned, describes it correctly as frontend/backend visibility within the same account rather than a cross-account/global store"}
+      ]
+    }
+  ]
+}
