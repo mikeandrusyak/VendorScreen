@@ -6,3 +6,4 @@ __pycache__/
 venv/
 .mappsrc
 code.tar.gz
+.claude/worktrees/
