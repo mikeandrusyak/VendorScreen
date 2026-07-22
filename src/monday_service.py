@@ -34,6 +34,20 @@ async def get_item_name(item_id, api_token):
     return items[0].get("name") if items else None
 
 
+async def get_item_board_id(item_id, api_token):
+    """Resolve an item's board id server-side. Some triggers (e.g. monday's
+    native "When button clicked") don't reliably surface a board context
+    variable to the action, unlike "When item created" — falling back to this
+    avoids depending on that per-trigger behavior."""
+    query = "query ($itemId: [ID!]) { items (ids: $itemId) { board { id } } }"
+    data = await monday_request(query, {"itemId": [str(item_id)]}, api_token)
+    items = (data.get("data") or {}).get("items") or []
+    if not items:
+        return None
+    board = items[0].get("board") or {}
+    return board.get("id")
+
+
 async def get_item_column_text(item_id, column_id, api_token):
     """Read the display text of a single column on an item (e.g. the country the
     client mapped in the recipe). Returns None if the column is empty or absent —
