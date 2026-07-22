@@ -10,7 +10,7 @@ Full product/architecture description: [README.md](README.md). Pricing/plan logi
 
 ## Layout
 
-- `src/` — the actual deployed app (FastAPI + Uvicorn). This is what `mapps code:push` ships.
+- `src/` — the actual deployed app (FastAPI + Uvicorn). This is what CI/CD ships via `mapps code:push` on every merge to `main` — see "Delivery is CI/CD" below.
   - `main.py` — HTTP routes (`/monday/execute_action`, `/monday/export_action`, `/monday/subscription_webhook`, `/audit/export`), JWT verification, field extraction/validation, `process_vendor()` orchestration.
   - `monday_service.py` — all monday.com GraphQL calls (item lookups, column writes, notifications).
   - `sanctions_service.py` — OpenSanctions `/match` calls, retry/backoff, risk-level scoring.
@@ -57,6 +57,6 @@ Only **secrets** belong in `.env` / monday Code env vars — never board/column 
 - **Dev loop:** `python src/main.py` (port 3000), `ngrok http 3000` to get an HTTPS URL for testing against a real recipe action.
 - **Lint/format:** `ruff check .` and `ruff format --check .` (CI-enforced; `src/main.py` is intentionally exempt from E402 because `load_dotenv()` must run before other imports).
 - **Tests:** `pytest -q` from repo root. The Postgres-backed integration test (`test_repository_integration.py`) needs `TEST_DATABASE_URL`; CI spins up a throwaway Postgres service for it, and it's skipped locally without that var (see the "skipped" count in test output — that's expected, not a failure).
-- **CI/CD ([.github/workflows](.github/workflows)):** every push/PR runs lint + tests. Non-draft PRs from the same repo (and pushes to `main`) additionally deploy to monday's single shared **draft** version and run the smoke test — there is only one draft slot account-wide, so deploys are serialized via a global concurrency group. Promoting draft → live customer-facing is a separate, manual step in Developer Center (not done by CI).
+- **Delivery is CI/CD, not manual.** `.github/workflows/deploy.yml` deploys automatically: every push/PR runs lint + tests; non-draft PRs from the same repo (and pushes to `main`) additionally push to monday's single shared **draft** version and run the smoke test — there is only one draft slot account-wide, so deploys are serialized via a global concurrency group (`deploy-monday`). **Don't manually run `mapps code:push`** as part of a normal change — merging (or pushing) is the deploy step; running it locally on top of CI risks racing/clobbering the shared draft slot. Reach for it manually only for first-time app setup (`mapps init`) or to debug the pipeline itself. Promoting draft → live customer-facing is a separate, manual step in Developer Center (not done by CI).
 - **Secrets:** `.mappsrc` (monday CLI auth token) and `.env` are gitignored — never commit them. Setting env vars on the actual deployed app is `mapps code:env --mode set --key ... --value ...`, not editing `.env` (monday Code doesn't read local `.env`).
 - **Multi-tenant discipline:** never hardcode a board ID, column ID, or account-specific value in `src/`. If a value should be per-customer, it comes from `inboundFieldValues` or is resolved via a GraphQL lookup keyed off something the trigger did supply (see the boardId fallback above as the pattern to follow).
