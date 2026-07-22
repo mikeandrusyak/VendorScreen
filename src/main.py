@@ -409,6 +409,31 @@ async def _alert_critical(user_id, item_id, vendor_name, result, api_token):
         sentry_sdk.capture_exception(err)
 
 
+async def _mark_unavailable(
+    board_id, item_id, status_column_id, details_column_id, api_token, account_id, vendor_name
+):
+    """Write the fail-safe 'Screening Failed' status so an item is never left
+    blank after an error, whatever the cause. Never raises — a failure here is
+    logged/reported rather than propagated, since the caller is already in its
+    own error-handling path."""
+    result = unavailable_result()
+    try:
+        await update_vendor_record(
+            board_id=board_id,
+            item_id=item_id,
+            status_column_id=status_column_id,
+            details_column_id=details_column_id,
+            risk_level=result["riskLevel"],
+            details=result["details"],
+            api_token=api_token,
+        )
+        log.info("[vendor] Marked item %s as '%s'", item_id, result["riskLevel"])
+        await _record_audit(account_id, board_id, item_id, vendor_name, result)
+    except Exception as update_err:
+        log.error("[vendor] Could not write failure status for item %s: %s", item_id, update_err)
+        sentry_sdk.capture_exception(update_err)
+
+
 async def process_vendor(
     board_id,
     item_id,
@@ -420,6 +445,7 @@ async def process_vendor(
     user_id=None,
 ):
     async with vendor_semaphore:
+        vendor_name = None
         try:
             # Enforce the account's monthly quota before doing any paid work
             # (the OpenSanctions call). Skipped when the DB is disabled or the
@@ -513,34 +539,35 @@ async def process_vendor(
             await _record_audit(account_id, board_id, item_id, vendor_name, result)
             await _alert_critical(user_id, item_id, vendor_name, result, api_token)
         except SanctionsUnavailableError as err:
-            # Screening could not run — don't lose it silently. Mark the board so
-            # the client sees the check needs a re-run instead of a blank status.
-            # Reported to Sentry too so we can track OpenSanctions outages.
+            # OpenSanctions itself is down/rate-limited after retries. Mark the
+            # board so the client sees the check needs a re-run instead of a
+            # blank status. Reported to Sentry so we can track outages.
             log.error("[vendor] OpenSanctions unavailable for item %s: %s", item_id, err)
             sentry_sdk.capture_exception(err)
-            result = unavailable_result()
-            try:
-                await update_vendor_record(
-                    board_id=board_id,
-                    item_id=item_id,
-                    status_column_id=status_column_id,
-                    details_column_id=details_column_id,
-                    risk_level=result["riskLevel"],
-                    details=result["details"],
-                    api_token=api_token,
-                )
-                log.info("[vendor] Marked item %s as '%s'", item_id, result["riskLevel"])
-                await _record_audit(account_id, board_id, item_id, vendor_name, result)
-            except Exception as update_err:
-                log.error(
-                    "[vendor] Could not write unavailable status for item %s: %s",
-                    item_id,
-                    update_err,
-                )
-                sentry_sdk.capture_exception(update_err)
+            await _mark_unavailable(
+                board_id,
+                item_id,
+                status_column_id,
+                details_column_id,
+                api_token,
+                account_id,
+                vendor_name,
+            )
         except Exception as err:
+            # Anything else unexpected (a non-retryable OpenSanctions error, a
+            # monday GraphQL failure resolving the item, a bug) — same fail-safe
+            # applies: never leave the board blank, whatever the cause.
             log.error("[vendor] Failed to process item %s: %s", item_id, err)
             sentry_sdk.capture_exception(err)
+            await _mark_unavailable(
+                board_id,
+                item_id,
+                status_column_id,
+                details_column_id,
+                api_token,
+                account_id,
+                vendor_name,
+            )
 
 
 if __name__ == "__main__":
