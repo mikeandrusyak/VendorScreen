@@ -18,6 +18,8 @@ Recipe trigger: "When an item is created"
         ├── reads payload.inboundFieldValues → boardId, itemId, statusColumnId,
         │     detailsColumnId, [countryColumnId — optional]
         │     (chosen by the CUSTOMER in the automation UI — NOT from .env)
+        │     if boardId is absent (some triggers, e.g. "When button clicked",
+        │     don't reliably pass it) → resolved from itemId via get_item_board_id()
         ├── 200 OK returned immediately
         └── async process_vendor()
               ├── monday_service.get_item_name(item_id)   → vendor name
