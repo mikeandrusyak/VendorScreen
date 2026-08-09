@@ -81,7 +81,10 @@ await secretsManager.get('SOME_KEY', { invalidate });
 ```python
 # Python: monday_code (PyPI)
 import monday_code
-configuration = monday_code.Configuration(host="http://localhost:59999")  # local dev only, see below
+
+configuration = monday_code.Configuration(
+    host="http://localhost:59999"
+)  # local dev only, see below
 async with monday_code.ApiClient(configuration) as api_client:
     env_api = monday_code.EnvironmentVariablesApi(api_client)
     value = await env_api.get_environment_variable(name)
