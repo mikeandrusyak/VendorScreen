@@ -1,5 +1,6 @@
 import main
 from repository import QuotaResult
+from sanctions_service import SanctionsUnavailableError
 
 
 def _stub_screening(monkeypatch, *, name="Acme", result=None):
@@ -263,6 +264,39 @@ async def test_alert_failure_does_not_break_screening(monkeypatch):
 
     assert calls["update"]["risk_level"] == "Critical"  # screening still completed
     assert "err" in captured  # alert failure reported, not raised
+
+
+async def test_sanctions_unavailable_marks_board_failed(monkeypatch):
+    # OpenSanctions down after retries: the board must show "Screening Failed",
+    # not be left blank.
+    monkeypatch.setattr(main.db, "is_configured", lambda: False)
+    calls = _stub_screening(monkeypatch)
+
+    async def boom(vendor_name, country=None):
+        raise SanctionsUnavailableError("still down after 3 attempts")
+
+    monkeypatch.setattr(main, "check_vendor_with_retry", boom)
+
+    await main.process_vendor("b", "i", "s", "d", "tok")
+
+    assert calls["update"]["risk_level"] == "Screening Failed"
+
+
+async def test_unexpected_error_marks_board_failed(monkeypatch):
+    # Any other unhandled error (not just SanctionsUnavailableError — e.g. a
+    # non-retryable OpenSanctions error or a monday lookup failure) must not
+    # leave the board blank either.
+    monkeypatch.setattr(main.db, "is_configured", lambda: False)
+    calls = _stub_screening(monkeypatch)
+
+    async def boom(vendor_name, country=None):
+        raise RuntimeError("something unrelated to sanctions broke")
+
+    monkeypatch.setattr(main, "check_vendor_with_retry", boom)
+
+    await main.process_vendor("b", "i", "s", "d", "tok")
+
+    assert calls["update"]["risk_level"] == "Screening Failed"
 
 
 async def test_no_account_id_skips_quota_entirely(monkeypatch):
