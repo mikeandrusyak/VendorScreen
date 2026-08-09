@@ -106,6 +106,53 @@ def test_valid_payload_enqueues_and_returns_empty(monkeypatch):
     assert seen["account_id"] is None
 
 
+def test_missing_board_id_resolves_from_item(monkeypatch):
+    # "When button clicked" doesn't reliably supply boardId (unlike "When item
+    # created") — the app must fall back to resolving it from the item.
+    monkeypatch.setattr(main, "APP_ENV", "development")
+    monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
+
+    async def fake_get_board(item_id, api_token):
+        assert item_id == "456"
+        return "resolved-board"
+
+    monkeypatch.setattr(main, "get_item_board_id", fake_get_board)
+
+    seen = {}
+
+    async def fake_process(board_id, item_id, status_column_id, details_column_id, api_token, **kw):
+        seen["board_id"] = board_id
+
+    monkeypatch.setattr(main, "process_vendor", fake_process)
+
+    fields = _valid_fields()
+    del fields["boardId"]
+
+    resp = client.post(ACTION_URL, json={"payload": {"inboundFieldValues": fields}})
+
+    assert resp.status_code == 200
+    assert seen["board_id"] == "resolved-board"
+
+
+def test_board_id_resolution_failure_is_bad_request(monkeypatch):
+    # If the fallback lookup itself fails, this is still a missing-field 400,
+    # not an unhandled exception.
+    monkeypatch.setattr(main, "APP_ENV", "development")
+    monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
+
+    async def boom(item_id, api_token):
+        raise RuntimeError("monday down")
+
+    monkeypatch.setattr(main, "get_item_board_id", boom)
+
+    fields = _valid_fields()
+    del fields["boardId"]
+
+    resp = client.post(ACTION_URL, json={"payload": {"inboundFieldValues": fields}})
+
+    assert resp.status_code == 400
+
+
 def test_valid_jwt_authorizes(monkeypatch):
     monkeypatch.setenv("MONDAY_SIGNING_SECRET", "test-secret")
     monkeypatch.setattr(main, "process_vendor", _noop)

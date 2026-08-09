@@ -20,6 +20,7 @@ import export_token
 import repository
 from monday_service import (
     create_notification,
+    get_item_board_id,
     get_item_column_text,
     get_item_name,
     update_vendor_record,
@@ -160,6 +161,15 @@ async def execute_action(request: Request):
     country_column_id = field_value(fields.get("countryColumnId"), "columnId", "id", "value")
     # Per-account short-lived token from the JWT (dev: MONDAY_API_TOKEN)
     api_token = auth.get("shortLivedToken")
+
+    # Some triggers (e.g. "When button clicked") don't reliably pass boardId
+    # as a context variable the way "When item created" does. Fall back to
+    # resolving it from the item itself rather than failing the whole run.
+    if not board_id and item_id:
+        try:
+            board_id = await get_item_board_id(item_id, api_token)
+        except Exception as err:
+            log.error("[action] Could not resolve board id for item %s: %s", item_id, err)
     # Tenant key for usage limits. Present on real Monday JWTs; absent in dev
     # (no signed token) — enforcement is then skipped for that request.
     account_id = auth.get("accountId")
