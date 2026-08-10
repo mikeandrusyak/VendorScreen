@@ -66,7 +66,7 @@ def test_invalid_jwt_is_unauthorized():
 
 def test_missing_fields_is_bad_request(monkeypatch):
     # Dev-mode fallback supplies auth, so we reach field validation.
-    monkeypatch.setattr(main, "APP_ENV", "development")
+    monkeypatch.setattr(main, "NODE_ENV", "development")
     monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
 
     resp = client.post(ACTION_URL, json={"payload": {"inboundFieldValues": {}}})
@@ -75,7 +75,7 @@ def test_missing_fields_is_bad_request(monkeypatch):
 
 
 def test_valid_payload_enqueues_and_returns_empty(monkeypatch):
-    monkeypatch.setattr(main, "APP_ENV", "development")
+    monkeypatch.setattr(main, "NODE_ENV", "development")
     monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
 
     seen = {}
@@ -109,7 +109,7 @@ def test_valid_payload_enqueues_and_returns_empty(monkeypatch):
 def test_missing_board_id_resolves_from_item(monkeypatch):
     # "When button clicked" doesn't reliably supply boardId (unlike "When item
     # created") — the app must fall back to resolving it from the item.
-    monkeypatch.setattr(main, "APP_ENV", "development")
+    monkeypatch.setattr(main, "NODE_ENV", "development")
     monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
 
     async def fake_get_board(item_id, api_token):
@@ -137,7 +137,7 @@ def test_missing_board_id_resolves_from_item(monkeypatch):
 def test_board_id_resolution_failure_is_bad_request(monkeypatch):
     # If the fallback lookup itself fails, this is still a missing-field 400,
     # not an unhandled exception.
-    monkeypatch.setattr(main, "APP_ENV", "development")
+    monkeypatch.setattr(main, "NODE_ENV", "development")
     monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
 
     async def boom(item_id, api_token):
@@ -196,13 +196,13 @@ def test_subscription_challenge_is_echoed():
 
 
 def test_subscription_webhook_requires_auth_in_production(monkeypatch):
-    monkeypatch.setattr(main, "APP_ENV", "production")
+    monkeypatch.setattr(main, "NODE_ENV", "production")
     resp = client.post(SUBSCRIPTION_URL, json=_subscription_event("subscription_created"))
     assert resp.status_code == 401
 
 
 def test_subscription_created_upgrades_plan(monkeypatch):
-    monkeypatch.setattr(main, "APP_ENV", "development")
+    monkeypatch.setattr(main, "NODE_ENV", "development")
     seen = {}
 
     async def fake_set_plan(account_id, plan):
@@ -220,7 +220,7 @@ def test_subscription_created_upgrades_plan(monkeypatch):
 
 
 def test_subscription_cancelled_downgrades_to_free(monkeypatch):
-    monkeypatch.setattr(main, "APP_ENV", "development")
+    monkeypatch.setattr(main, "NODE_ENV", "development")
     seen = {}
 
     async def fake_set_plan(account_id, plan):
@@ -239,7 +239,7 @@ def test_subscription_cancelled_downgrades_to_free(monkeypatch):
 
 
 def test_subscription_unknown_plan_id_defaults_to_free(monkeypatch):
-    monkeypatch.setattr(main, "APP_ENV", "development")
+    monkeypatch.setattr(main, "NODE_ENV", "development")
     seen = {}
 
     async def fake_set_plan(account_id, plan):
@@ -258,7 +258,7 @@ def test_subscription_unknown_plan_id_defaults_to_free(monkeypatch):
 
 
 def test_subscription_unrelated_event_is_ignored(monkeypatch):
-    monkeypatch.setattr(main, "APP_ENV", "development")
+    monkeypatch.setattr(main, "NODE_ENV", "development")
     called = False
 
     async def fake_set_plan(account_id, plan):
@@ -295,7 +295,7 @@ def test_export_action_challenge_is_echoed():
 
 def test_export_action_requires_account(monkeypatch):
     # Dev fallback auth has no accountId, so there's no tenant to scope to.
-    monkeypatch.setattr(main, "APP_ENV", "development")
+    monkeypatch.setattr(main, "NODE_ENV", "development")
     monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
 
     resp = client.post(EXPORT_URL, json={"payload": {"inboundFieldValues": {"itemId": "1"}}})
@@ -325,6 +325,62 @@ def test_export_action_sends_notification_link(monkeypatch):
     assert sent["item_id"] == "456"
     # The notification carries a tokenized download link.
     assert "/audit/export?token=" in sent["text"]
+
+
+class _FakeRequest:
+    def __init__(self, headers, base_url):
+        self.headers = headers
+        self.base_url = base_url
+
+
+def test_public_base_url_prefers_configured(monkeypatch):
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://app.monday.app/")
+    req = _FakeRequest(
+        {"x-forwarded-host": "proxy.example", "x-forwarded-proto": "https"},
+        "http://internal.a.run.app/",
+    )
+    assert main.public_base_url(req) == "https://app.monday.app"
+
+
+def test_public_base_url_falls_back_to_forwarded_host(monkeypatch):
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    req = _FakeRequest(
+        {"x-forwarded-host": "live1-service.us.monday.app", "x-forwarded-proto": "https"},
+        "http://internal.a.run.app/",
+    )
+    assert main.public_base_url(req) == "https://live1-service.us.monday.app"
+
+
+def test_public_base_url_falls_back_to_base_url(monkeypatch):
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    req = _FakeRequest({}, "http://localhost:3000/")
+    assert main.public_base_url(req) == "http://localhost:3000"
+
+
+def test_export_link_uses_forwarded_host(monkeypatch):
+    monkeypatch.setenv("MONDAY_SIGNING_SECRET", "test-secret")
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    sent = {}
+
+    async def fake_notify(user_id, item_id, text, api_token):
+        sent["text"] = text
+
+    monkeypatch.setattr(main, "create_notification", fake_notify)
+
+    resp = client.post(
+        EXPORT_URL,
+        json={"payload": {"inboundFieldValues": {"itemId": {"itemId": "456"}}}},
+        headers={
+            "Authorization": f"Bearer {_export_jwt()}",
+            "X-Forwarded-Host": "live1-service.us.monday.app",
+            "X-Forwarded-Proto": "https",
+        },
+    )
+
+    assert resp.status_code == 200
+    # The link points at the public monday.app host, not the internal Cloud Run URL.
+    assert "https://live1-service.us.monday.app/audit/export?token=" in sent["text"]
+    assert ".a.run.app" not in sent["text"]
 
 
 def test_download_rejects_invalid_token():

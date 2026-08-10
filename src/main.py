@@ -37,13 +37,16 @@ from sanctions_service import (
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("vendorscreen")
 
-# APP_ENV is the Python-native name; NODE_ENV is still honored so existing
-# Monday Code deployments keep production behavior without re-configuring.
-APP_ENV = os.getenv("APP_ENV") or os.getenv("NODE_ENV") or "development"
+# Gates auth enforcement: "production" => a valid JWT is required on every action.
+# Read from the NODE_ENV env var (already set on the monday Code deploy) and
+# defaults to "production" (fail-closed) — an unset or misspelled value must never
+# silently disable JWT verification on a live deploy. Local dev opts out with
+# NODE_ENV=development.
+NODE_ENV = os.getenv("NODE_ENV") or "production"
 
 # Initialize error tracking before the app is created so the ASGI integration
 # wraps it. No-op unless SENTRY_DSN is set.
-init_sentry(APP_ENV)
+init_sentry(NODE_ENV)
 
 # Max 3 concurrent vendor checks — prevents flooding OpenSanctions during bulk imports
 CONCURRENCY = 3
@@ -81,7 +84,7 @@ def extract_auth(request: Request):
     auth_header = request.headers.get("authorization")
 
     if not auth_header:
-        if APP_ENV != "production":
+        if NODE_ENV != "production":
             log.warning("[auth] No Authorization header — using MONDAY_API_TOKEN (dev mode)")
             return {"shortLivedToken": os.getenv("MONDAY_API_TOKEN")}
         return None
@@ -230,7 +233,7 @@ async def subscription_webhook(request: Request):
     if body.get("challenge"):
         return {"challenge": body["challenge"]}
 
-    if APP_ENV == "production" and extract_auth(request) is None:
+    if NODE_ENV == "production" and extract_auth(request) is None:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
 
     event_type = (body.get("type") or "").lower()
@@ -264,6 +267,24 @@ async def subscription_webhook(request: Request):
         sentry_sdk.capture_exception(err)
 
     return {}
+
+
+def public_base_url(request):
+    """The customer-facing base URL used to build the tokenized download link.
+
+    On monday Code the app runs behind a proxy on Cloud Run, so request.base_url
+    resolves to the internal *.a.run.app host (over http) rather than the public
+    *.monday.app URL — an unusable, non-clickable download link. Resolve in order:
+    an explicit PUBLIC_BASE_URL, then the proxy's forwarded host/proto, then
+    request.base_url (correct for local dev where there's no proxy)."""
+    configured = os.getenv("PUBLIC_BASE_URL")
+    if configured:
+        return configured.rstrip("/")
+    forwarded_host = request.headers.get("x-forwarded-host")
+    if forwarded_host:
+        proto = request.headers.get("x-forwarded-proto", "https")
+        return f"{proto}://{forwarded_host}".rstrip("/")
+    return str(request.base_url).rstrip("/")
 
 
 # Audit-log export, request half (P1). A recipe action the customer runs from
@@ -308,9 +329,9 @@ async def export_action(request: Request):
         )
 
     token = export_token.issue(account_id)
-    # request.base_url is the app's public URL as monday reached it, so the link
-    # is correct in any deploy without hardcoding a host.
-    link = f"{str(request.base_url).rstrip('/')}/audit/export?token={token}"
+    # Build the link from the public host (see public_base_url) — request.base_url
+    # alone points at the internal Cloud Run host behind monday's proxy.
+    link = f"{public_base_url(request)}/audit/export?token={token}"
     text = (
         f"Your VendorScreen screening audit export is ready. Download it within 15 minutes: {link}"
     )
