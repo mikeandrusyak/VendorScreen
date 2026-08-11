@@ -47,6 +47,13 @@ async def test_list_events_empty_without_pool(monkeypatch):
     assert await repository.list_events(1) == []
 
 
+async def test_purge_account_noop_without_pool(monkeypatch):
+    # DB disabled → nothing is stored, so purge is a no-op returning False rather
+    # than raising.
+    monkeypatch.setattr(db, "_pool", None)
+    assert await repository.purge_account(12345) is False
+
+
 def test_as_bigint_coerces_and_tolerates_junk():
     assert repository._as_bigint("456") == 456
     assert repository._as_bigint(789) == 789

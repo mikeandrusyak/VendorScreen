@@ -273,6 +273,58 @@ def test_subscription_unrelated_event_is_ignored(monkeypatch):
     assert called is False
 
 
+def test_uninstall_purges_account_data(monkeypatch):
+    monkeypatch.setattr(main, "NODE_ENV", "development")
+    purged = {}
+
+    async def fake_purge(account_id):
+        purged["account_id"] = account_id
+        return True
+
+    async def fail_set_plan(account_id, plan):  # must NOT run on uninstall
+        raise AssertionError("set_plan should not be called on uninstall")
+
+    monkeypatch.setattr(repository, "purge_account", fake_purge)
+    monkeypatch.setattr(repository, "set_plan", fail_set_plan)
+
+    resp = client.post(SUBSCRIPTION_URL, json={"type": "uninstall", "data": {"account_id": 777}})
+
+    assert resp.status_code == 200
+    assert purged == {"account_id": 777}
+
+
+def test_uninstall_requires_auth_in_production(monkeypatch):
+    monkeypatch.setattr(main, "NODE_ENV", "production")
+    called = False
+
+    async def fake_purge(account_id):
+        nonlocal called
+        called = True
+        return True
+
+    monkeypatch.setattr(repository, "purge_account", fake_purge)
+
+    resp = client.post(SUBSCRIPTION_URL, json={"type": "uninstall", "data": {"account_id": 777}})
+
+    assert resp.status_code == 401
+    assert called is False
+
+
+def test_uninstall_purge_failure_still_returns_200(monkeypatch):
+    monkeypatch.setattr(main, "NODE_ENV", "development")
+
+    async def boom_purge(account_id):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(repository, "purge_account", boom_purge)
+
+    resp = client.post(SUBSCRIPTION_URL, json={"type": "uninstall", "data": {"account_id": 777}})
+
+    # Fail-open: a purge error is logged/reported but the webhook still acks, so
+    # monday doesn't hammer us with retries.
+    assert resp.status_code == 200
+
+
 # --- audit export ------------------------------------------------------------
 
 EXPORT_URL = "/monday/export_action"
