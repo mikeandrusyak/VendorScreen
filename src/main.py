@@ -14,11 +14,12 @@ import jwt
 import sentry_sdk
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 
 import db
 import export_token
 import repository
+import session_token
 from monday_service import (
     create_notification,
     get_item_board_id,
@@ -37,6 +38,9 @@ from sanctions_service import (
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("vendorscreen")
+
+# Static assets for the client-side Board view (served at /view).
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 # Gates auth enforcement: "production" => a valid JWT is required on every action.
 # Read from the NODE_ENV env var (already set on the monday Code deploy) and
@@ -369,6 +373,40 @@ async def export_action(request: Request):
     return {}
 
 
+AUDIT_COLUMNS = (
+    "created_at",
+    "board_id",
+    "item_id",
+    "vendor_name",
+    "risk_level",
+    "score",
+    "match_id",
+    "match_caption",
+)
+
+
+def _audit_row(event):
+    """Serialize one screening event to a JSON-safe dict (created_at -> ISO str)."""
+    created = event["created_at"]
+    row = dict(event)
+    row["created_at"] = created.isoformat() if hasattr(created, "isoformat") else created
+    return {col: row.get(col) for col in AUDIT_COLUMNS}
+
+
+def _audit_csv_response(events, filename):
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(AUDIT_COLUMNS)
+    for event in events:
+        row = _audit_row(event)
+        writer.writerow([row[col] for col in AUDIT_COLUMNS])
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # Audit-log export, download half (P1). Reached by the tokenized link from the
 # notification above — the token both authenticates and scopes the download to a
 # single account, so this route needs no monday JWT. Streams CSV.
@@ -379,42 +417,55 @@ async def audit_export(token: str = ""):
         return PlainTextResponse("Invalid or expired export link.", status_code=401)
 
     events = await repository.list_events(account_id)
+    return _audit_csv_response(events, f"vendorscreen-audit-{account_id}.csv")
 
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(
-        [
-            "created_at",
-            "board_id",
-            "item_id",
-            "vendor_name",
-            "risk_level",
-            "score",
-            "match_id",
-            "match_caption",
-        ]
-    )
-    for e in events:
-        created = e["created_at"]
-        writer.writerow(
-            [
-                created.isoformat() if hasattr(created, "isoformat") else created,
-                e["board_id"],
-                e["item_id"],
-                e["vendor_name"],
-                e["risk_level"],
-                e["score"],
-                e["match_id"],
-                e["match_caption"],
-            ]
-        )
 
-    filename = f"vendorscreen-audit-{account_id}.csv"
-    return Response(
-        content=buffer.getvalue(),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+# --- Board view (client-side feature) ---------------------------------------
+# A board view renders our iframe UI (served at /view) inside monday. It reads
+# the board's screening audit as a table and offers a native CSV download. Both
+# data routes authenticate the caller with the monday session token (verified
+# with the app's Client Secret) and scope results to the token's account plus the
+# requested board — so a tenant only ever sees its own account's data.
+
+
+def _board_view_auth(request):
+    """Return (account_id, session) for a valid session token, else (None, None)."""
+    header = request.headers.get("authorization") or ""
+    token = header.replace("Bearer ", "", 1) or request.query_params.get("sessionToken", "")
+    session = session_token.verify(token)
+    if session is None:
+        return None, None
+    return session["account_id"], session
+
+
+@app.get("/view")
+async def board_view():
+    """Serve the board-view frontend (static HTML that loads monday-sdk-js)."""
+    return FileResponse(os.path.join(STATIC_DIR, "board_view.html"), media_type="text/html")
+
+
+@app.get("/view/audit.json")
+async def board_view_audit_json(request: Request, boardId: str = ""):
+    account_id, _ = _board_view_auth(request)
+    if account_id is None:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    if not boardId:
+        return JSONResponse(status_code=400, content={"error": "boardId is required"})
+
+    events = await repository.list_events(account_id, board_id=boardId)
+    return {"rows": [_audit_row(e) for e in events]}
+
+
+@app.get("/view/audit.csv")
+async def board_view_audit_csv(request: Request, boardId: str = ""):
+    account_id, _ = _board_view_auth(request)
+    if account_id is None:
+        return PlainTextResponse("Unauthorized", status_code=401)
+    if not boardId:
+        return PlainTextResponse("boardId is required", status_code=400)
+
+    events = await repository.list_events(account_id, board_id=boardId)
+    return _audit_csv_response(events, f"vendorscreen-audit-board-{boardId}.csv")
 
 
 async def _record_audit(account_id, board_id, item_id, vendor_name, result):

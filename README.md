@@ -81,6 +81,7 @@ Only **secrets** live in the environment. Board and column IDs come from the rec
 | Variable | Where | Description |
 |---|---|---|
 | `MONDAY_SIGNING_SECRET` | Monday Code + local | JWT verification for recipe action requests (Developer Center → App credentials → signing_secret) |
+| `MONDAY_CLIENT_SECRET` | Monday Code + local | Verifies the **board-view** session token (`monday.get('sessionToken')`), signed with the app's Client Secret — a *different* secret from the signing secret above (Developer Center → App credentials → client_secret). Required for the Screening Audit board view. |
 | `OPENSANCTIONS_API_KEY` | Monday Code + local | OpenSanctions authentication |
 | `NODE_ENV` | Monday Code + local | `production` in deploy (enforces JWT verification), `development` locally (enables the `MONDAY_API_TOKEN` fallback). **Defaults to `production` (fail-closed)** when unset, so a missing/misspelled value never silently disables auth. |
 | `MONDAY_API_TOKEN` | **local dev only** | Personal API token used only when no `Authorization` header is present (dev mode). Not needed in production — the token comes from the JWT. |

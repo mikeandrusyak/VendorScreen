@@ -477,3 +477,100 @@ def test_download_streams_csv_for_valid_token(monkeypatch):
     assert "Bad Actor" in body
     assert "Critical" in body
     assert "0.95" in body
+
+
+# --- board view --------------------------------------------------------------
+
+VIEW_JSON_URL = "/view/audit.json"
+VIEW_CSV_URL = "/view/audit.csv"
+
+
+def _session_jwt(secret="client-secret", account_id=777, user_id=42):
+    return jwt.encode(
+        {"dat": {"account_id": account_id, "user_id": user_id}},
+        secret,
+        algorithm="HS256",
+    )
+
+
+def test_board_view_serves_html():
+    resp = client.get("/view")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    assert "Screening Audit" in resp.text
+
+
+def test_board_view_json_requires_session_token(monkeypatch):
+    monkeypatch.setenv("MONDAY_CLIENT_SECRET", "client-secret")
+    resp = client.get(VIEW_JSON_URL, params={"boardId": "123"})
+    assert resp.status_code == 401
+
+
+def test_board_view_json_requires_board_id(monkeypatch):
+    monkeypatch.setenv("MONDAY_CLIENT_SECRET", "client-secret")
+    resp = client.get(VIEW_JSON_URL, headers={"Authorization": f"Bearer {_session_jwt()}"})
+    assert resp.status_code == 400
+
+
+def test_board_view_json_returns_board_scoped_rows(monkeypatch):
+    monkeypatch.setenv("MONDAY_CLIENT_SECRET", "client-secret")
+
+    import datetime as dt
+
+    async def fake_list_events(account_id, board_id=None, limit=10_000):
+        assert account_id == 777
+        assert board_id == "123"
+        return [
+            {
+                "created_at": dt.datetime(2026, 7, 11, 9, 0, tzinfo=dt.UTC),
+                "board_id": 123,
+                "item_id": 456,
+                "vendor_name": "Bad Actor",
+                "risk_level": "Critical",
+                "score": 0.95,
+                "match_id": "ent-1",
+                "match_caption": "Bad Actor",
+            }
+        ]
+
+    monkeypatch.setattr(repository, "list_events", fake_list_events)
+
+    resp = client.get(
+        VIEW_JSON_URL,
+        params={"boardId": "123"},
+        headers={"Authorization": f"Bearer {_session_jwt()}"},
+    )
+    assert resp.status_code == 200
+    rows = resp.json()["rows"]
+    assert len(rows) == 1
+    assert rows[0]["vendor_name"] == "Bad Actor"
+    assert rows[0]["created_at"] == "2026-07-11T09:00:00+00:00"
+
+
+def test_board_view_csv_streams_board_scoped(monkeypatch):
+    monkeypatch.setenv("MONDAY_CLIENT_SECRET", "client-secret")
+
+    async def fake_list_events(account_id, board_id=None, limit=10_000):
+        assert board_id == "123"
+        return []
+
+    monkeypatch.setattr(repository, "list_events", fake_list_events)
+
+    resp = client.get(
+        VIEW_CSV_URL,
+        params={"boardId": "123"},
+        headers={"Authorization": f"Bearer {_session_jwt()}"},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert "board-123" in resp.headers["content-disposition"]
+
+
+def test_board_view_csv_rejects_bad_token(monkeypatch):
+    monkeypatch.setenv("MONDAY_CLIENT_SECRET", "client-secret")
+    resp = client.get(
+        VIEW_CSV_URL,
+        params={"boardId": "123"},
+        headers={"Authorization": f"Bearer {_session_jwt(secret='attacker')}"},
+    )
+    assert resp.status_code == 401
