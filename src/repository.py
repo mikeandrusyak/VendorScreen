@@ -129,24 +129,31 @@ async def record_event(
         )
 
 
-async def list_events(account_id, limit: int = 10_000) -> list[dict]:
+async def list_events(account_id, board_id=None, limit: int = 10_000) -> list[dict]:
     """Return an account's screening events, newest first, for CSV export.
 
-    Returns an empty list when the database is disabled. Capped by `limit` so a
-    single export can't stream an unbounded result set.
+    When `board_id` is given, restrict to that board (the board-view export is
+    board-scoped). Returns an empty list when the database is disabled. Capped by
+    `limit` so a single export can't stream an unbounded result set.
     """
     pool = db.get_pool()
     if pool is None:
         return []
 
+    select = (
+        "SELECT created_at, board_id, item_id, vendor_name, risk_level, "
+        "score, match_id, match_caption FROM screening_events WHERE account_id = $1"
+    )
+    params = [int(account_id)]
+    board_id = _as_bigint(board_id)
+    if board_id is not None:
+        params.append(board_id)
+        select += f" AND board_id = ${len(params)}"
+    params.append(limit)
+    select += f" ORDER BY created_at DESC LIMIT ${len(params)}"
+
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT created_at, board_id, item_id, vendor_name, risk_level, "
-            "score, match_id, match_caption FROM screening_events "
-            "WHERE account_id = $1 ORDER BY created_at DESC LIMIT $2",
-            int(account_id),
-            limit,
-        )
+        rows = await conn.fetch(select, *params)
     return [dict(row) for row in rows]
 
 

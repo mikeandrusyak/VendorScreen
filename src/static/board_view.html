@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VendorScreen — Screening Audit</title>
+    <script src="https://cdn.jsdelivr.net/npm/monday-sdk-js/dist/main.js"></script>
+    <style>
+      :root {
+        --bg: #ffffff;
+        --fg: #323338;
+        --muted: #676879;
+        --border: #d0d4e4;
+        --accent: #0073ea;
+        --row: #f6f7fb;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1c1f3b;
+          --fg: #d5d8df;
+          --muted: #9699a6;
+          --border: #33355b;
+          --accent: #5a9bff;
+          --row: #23264a;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        font-family: "Figtree", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0;
+      }
+      #count {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      button {
+        background: var(--accent);
+        color: #fff;
+        border: 0;
+        border-radius: 6px;
+        padding: 8px 14px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+      tbody tr:nth-child(even) {
+        background: var(--row);
+      }
+      .msg {
+        color: var(--muted);
+        padding: 24px 0;
+        font-size: 14px;
+      }
+      .risk {
+        font-weight: 600;
+      }
+      .risk-Critical {
+        color: #d83a52;
+      }
+      .risk-Warning {
+        color: #d9a300;
+      }
+      .risk-Clear {
+        color: #258750;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Screening Audit</h1>
+        <span id="count"></span>
+      </div>
+      <button id="download" disabled>Download CSV</button>
+    </header>
+    <div id="content"><div class="msg">Loading…</div></div>
+
+    <script>
+      const monday = window.mondaySdk();
+      const content = document.getElementById("content");
+      const countEl = document.getElementById("count");
+      const downloadBtn = document.getElementById("download");
+
+      let boardId = null;
+      let sessionToken = null;
+
+      function esc(v) {
+        return v == null ? "" : String(v).replace(/[&<>"]/g, (c) =>
+          ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])
+        );
+      }
+
+      function renderTable(rows) {
+        if (!rows.length) {
+          content.innerHTML =
+            '<div class="msg">No screenings recorded for this board yet.</div>';
+          countEl.textContent = "";
+          return;
+        }
+        countEl.textContent = rows.length + " screening" + (rows.length === 1 ? "" : "s");
+        const head =
+          "<tr><th>Date</th><th>Vendor</th><th>Risk</th><th>Score</th><th>Match</th></tr>";
+        const body = rows
+          .map((r) => {
+            const date = (r.created_at || "").replace("T", " ").slice(0, 19);
+            const risk = esc(r.risk_level);
+            return (
+              "<tr><td>" +
+              esc(date) +
+              "</td><td>" +
+              esc(r.vendor_name) +
+              '</td><td class="risk risk-' +
+              risk +
+              '">' +
+              risk +
+              "</td><td>" +
+              esc(r.score) +
+              "</td><td>" +
+              esc(r.match_caption) +
+              "</td></tr>"
+            );
+          })
+          .join("");
+        content.innerHTML =
+          '<div class="table-wrap"><table><thead>' +
+          head +
+          "</thead><tbody>" +
+          body +
+          "</tbody></table></div>";
+      }
+
+      async function loadAudit() {
+        try {
+          const resp = await fetch("/view/audit.json?boardId=" + encodeURIComponent(boardId), {
+            headers: { Authorization: "Bearer " + sessionToken },
+          });
+          if (!resp.ok) throw new Error("HTTP " + resp.status);
+          const data = await resp.json();
+          renderTable(data.rows || []);
+          downloadBtn.disabled = false;
+        } catch (err) {
+          content.innerHTML =
+            '<div class="msg">Could not load the audit (' + esc(err.message) + ").</div>";
+        }
+      }
+
+      async function downloadCsv() {
+        downloadBtn.disabled = true;
+        try {
+          const resp = await fetch("/view/audit.csv?boardId=" + encodeURIComponent(boardId), {
+            headers: { Authorization: "Bearer " + sessionToken },
+          });
+          if (!resp.ok) throw new Error("HTTP " + resp.status);
+          const blob = await resp.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "vendorscreen-audit-board-" + boardId + ".csv";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        } catch (err) {
+          content.innerHTML =
+            '<div class="msg">Download failed (' + esc(err.message) + ").</div>";
+        } finally {
+          downloadBtn.disabled = false;
+        }
+      }
+
+      downloadBtn.addEventListener("click", downloadCsv);
+
+      async function init() {
+        try {
+          const [ctx, tokenRes] = await Promise.all([
+            monday.get("context"),
+            monday.get("sessionToken"),
+          ]);
+          boardId = ctx.data && ctx.data.boardId;
+          sessionToken = tokenRes.data;
+          if (!boardId || !sessionToken) throw new Error("missing board context");
+          await loadAudit();
+        } catch (err) {
+          content.innerHTML =
+            '<div class="msg">Could not initialize (' + esc(err.message) + ").</div>";
+        }
+      }
+
+      init();
+    </script>
+  </body>
+</html>

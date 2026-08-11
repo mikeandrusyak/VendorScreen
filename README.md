@@ -81,8 +81,9 @@ Only **secrets** live in the environment. Board and column IDs come from the rec
 | Variable | Where | Description |
 |---|---|---|
 | `MONDAY_SIGNING_SECRET` | Monday Code + local | JWT verification for recipe action requests (Developer Center → App credentials → signing_secret) |
+| `MONDAY_CLIENT_SECRET` | Monday Code + local | Verifies the **board-view** session token (`monday.get('sessionToken')`), signed with the app's Client Secret — a *different* secret from the signing secret above (Developer Center → App credentials → client_secret). Required for the Screening Audit board view. |
 | `OPENSANCTIONS_API_KEY` | Monday Code + local | OpenSanctions authentication |
-| `APP_ENV` | Monday Code + local | `production` in deploy, `development` locally (`NODE_ENV` is still honored for backwards compatibility) |
+| `NODE_ENV` | Monday Code + local | `production` in deploy (enforces JWT verification), `development` locally (enables the `MONDAY_API_TOKEN` fallback). **Defaults to `production` (fail-closed)** when unset, so a missing/misspelled value never silently disables auth. |
 | `MONDAY_API_TOKEN` | **local dev only** | Personal API token used only when no `Authorization` header is present (dev mode). Not needed in production — the token comes from the JWT. |
 | `SENTRY_DSN` | **optional** | Enables Sentry error tracking when set. Unset = tracking disabled, app runs unchanged. PII is never sent (`send_default_pii=False`). |
 | `SENTRY_TRACES_SAMPLE_RATE` | **optional** | Performance tracing sample rate (e.g. `0.1`). Defaults to `0` (errors only). |
@@ -123,7 +124,7 @@ Health check: `GET /` returns `{ "status": "ok" }`.
 ```bash
 ngrok http 3000
 ```
-Use the generated HTTPS URL + `/monday/execute_action` as the action URL while testing the recipe in Developer Center. In dev mode (`APP_ENV=development`) requests without an `Authorization` header fall back to `MONDAY_API_TOKEN`.
+Use the generated HTTPS URL + `/monday/execute_action` as the action URL while testing the recipe in Developer Center. In dev mode (`NODE_ENV=development`) requests without an `Authorization` header fall back to `MONDAY_API_TOKEN`.
 
 ---
 
@@ -157,7 +158,7 @@ mapps init   # requires App ID from Developer Center
 ### Set environment variables in Monday Code
 Monday Code does NOT read your local `.env` — set each secret once:
 ```bash
-mapps code:env --mode set --key APP_ENV --value production
+mapps code:env --mode set --key NODE_ENV --value production
 mapps code:env --mode set --key MONDAY_SIGNING_SECRET --value <value>
 mapps code:env --mode set --key OPENSANCTIONS_API_KEY --value <value>
 ```
