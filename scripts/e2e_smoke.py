@@ -252,7 +252,10 @@ def stage_audit_csv(item_id, account_id):
     if not ctype.startswith("text/csv"):
         raise SystemExit(f"expected a text/csv export, got content-type {ctype!r}")
     body = resp.text
-    header = "created_at,board_id,item_id,vendor_name,risk_level,score,match_id,match_caption"
+    header = (
+        "created_at,board_id,item_id,vendor_name,country,risk_level,"
+        "match_type,score,match_id,match_caption"
+    )
     if header not in body:
         raise SystemExit("audit CSV is missing the expected header row")
     # The screening we just ran should appear — unless the app has no
