@@ -378,7 +378,9 @@ AUDIT_COLUMNS = (
     "board_id",
     "item_id",
     "vendor_name",
+    "country",
     "risk_level",
+    "match_type",
     "score",
     "match_id",
     "match_caption",
@@ -468,7 +470,7 @@ async def board_view_audit_csv(request: Request, boardId: str = ""):
     return _audit_csv_response(events, f"vendorscreen-audit-board-{boardId}.csv")
 
 
-async def _record_audit(account_id, board_id, item_id, vendor_name, result):
+async def _record_audit(account_id, board_id, item_id, vendor_name, result, country=None):
     """Append a screening outcome to the audit log (P1). Scoped to a real tenant:
     skipped when the DB is off or the request has no account (dev), matching how
     the export endpoint is scoped by account. Fail-open — an audit write must
@@ -485,6 +487,8 @@ async def _record_audit(account_id, board_id, item_id, vendor_name, result):
             score=result.get("score"),
             match_id=result.get("matchId"),
             match_caption=result.get("matchCaption"),
+            country=country,
+            match_type=result.get("matchType"),
         )
     except Exception as err:
         log.error("[audit] failed to record event for item %s: %s", item_id, err)
@@ -638,7 +642,7 @@ async def process_vendor(
             )
 
             log.info("[vendor] Monday.com updated for item %s", item_id)
-            await _record_audit(account_id, board_id, item_id, vendor_name, result)
+            await _record_audit(account_id, board_id, item_id, vendor_name, result, country=country)
             await _alert_critical(user_id, item_id, vendor_name, result, api_token)
         except SanctionsUnavailableError as err:
             # OpenSanctions itself is down/rate-limited after retries. Mark the

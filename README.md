@@ -47,7 +47,7 @@ The counter's period key is `YYYY-MM`, so allowances reset at the month boundary
 
 ## Audit log & export
 
-When `DATABASE_URL` is set, every screening outcome is appended to an **append-only audit log** (`screening_events`) — one row per board write, with the risk level and a **trimmed match summary** (top match's score, entity id, and caption), never the raw provider payload. Over-limit and screening-failed outcomes are logged too, so the trail shows items that were received but not screened. Auditing is fail-open: a log write never blocks or fails a screening that already reached the board, and with the database disabled it is simply skipped.
+When `DATABASE_URL` is set, every screening outcome is appended to an **append-only audit log** (`screening_events`) — one row per board write, with the risk level, the **country** used to refine the query, the **match classification** (`sanction` / `pep` / `other`, derived from the matched entity's datasets/topics), and a **trimmed match summary** (top match's score, entity id, and caption), never the raw provider payload. Over-limit and screening-failed outcomes are logged too, so the trail shows items that were received but not screened. Auditing is fail-open: a log write never blocks or fails a screening that already reached the board, and with the database disabled it is simply skipped.
 
 Customers export their own audit trail as CSV through a second recipe action, without VendorScreen needing a user-facing frontend or login:
 

@@ -101,6 +101,8 @@ async def record_event(
     score=None,
     match_id=None,
     match_caption=None,
+    country=None,
+    match_type=None,
 ) -> None:
     """Append one screening outcome to the audit log.
 
@@ -117,7 +119,8 @@ async def record_event(
         await conn.execute(
             "INSERT INTO screening_events "
             "(account_id, board_id, item_id, vendor_name, risk_level, score, "
-            "match_id, match_caption) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            "match_id, match_caption, country, match_type) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
             int(account_id),
             _as_bigint(board_id),
             _as_bigint(item_id),
@@ -126,6 +129,8 @@ async def record_event(
             score,
             match_id,
             match_caption,
+            country,
+            match_type,
         )
 
 
@@ -142,7 +147,8 @@ async def list_events(account_id, board_id=None, limit: int = 10_000) -> list[di
 
     select = (
         "SELECT created_at, board_id, item_id, vendor_name, risk_level, "
-        "score, match_id, match_caption FROM screening_events WHERE account_id = $1"
+        "score, match_id, match_caption, country, match_type "
+        "FROM screening_events WHERE account_id = $1"
     )
     params = [int(account_id)]
     board_id = _as_bigint(board_id)

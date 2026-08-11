@@ -165,6 +165,9 @@ jobs:
         env:
           APP_URL: ${{ needs.deploy.outputs.app_url }}
           MONDAY_SIGNING_SECRET: ${{ secrets.MONDAY_SIGNING_SECRET }}
+          # Enables the board-view data-endpoint checks (mints a session token).
+          # If unset, the board-view stage checks only the /view HTML.
+          MONDAY_CLIENT_SECRET: ${{ secrets.MONDAY_CLIENT_SECRET }}
           E2E_MONDAY_TOKEN: ${{ secrets.E2E_MONDAY_TOKEN }}
           E2E_BOARD_ID: ${{ vars.E2E_BOARD_ID }}
           E2E_STATUS_COLUMN: ${{ vars.E2E_STATUS_COLUMN }}
