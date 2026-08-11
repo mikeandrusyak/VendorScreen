@@ -88,7 +88,7 @@ EXPORT_SCOPE = "audit-export"
 
 MONDAY_API = "https://api.monday.com/v2"
 VALID_LEVELS = {"Clear", "Warning", "Critical"}
-POLL_TIMEOUT_S = 90
+POLL_TIMEOUT_S = 180
 POLL_INTERVAL_S = 3
 
 

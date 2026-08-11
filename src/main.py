@@ -4,6 +4,7 @@ import io
 import logging
 import os
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -269,17 +270,36 @@ async def subscription_webhook(request: Request):
     return {}
 
 
-def public_base_url(request):
+def _url_origin(value):
+    """Return scheme://host for an http(s) URL string, else None."""
+    if not isinstance(value, str):
+        return None
+    parsed = urlparse(value)
+    if parsed.scheme in ("http", "https") and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return None
+
+
+def public_base_url(request, auth=None):
     """The customer-facing base URL used to build the tokenized download link.
 
     On monday Code the app runs behind a proxy on Cloud Run, so request.base_url
-    resolves to the internal *.a.run.app host (over http) rather than the public
-    *.monday.app URL — an unusable, non-clickable download link. Resolve in order:
-    an explicit PUBLIC_BASE_URL, then the proxy's forwarded host/proto, then
+    resolves to the internal *.a.run.app host (over http), and PUBLIC_BASE_URL is
+    no good either — env vars are shared across the draft and live deployments, so
+    a single value can't be right for both. The monday action JWT's `aud` claim is
+    the public endpoint URL monday actually called, so it yields the correct host
+    per deployment automatically. Resolve in order: an explicit PUBLIC_BASE_URL
+    override, then the `aud` origin, then the proxy's forwarded host/proto, then
     request.base_url (correct for local dev where there's no proxy)."""
     configured = os.getenv("PUBLIC_BASE_URL")
     if configured:
         return configured.rstrip("/")
+    if auth:
+        aud = auth.get("aud")
+        for candidate in aud if isinstance(aud, list) else [aud]:
+            origin = _url_origin(candidate)
+            if origin:
+                return origin
     forwarded_host = request.headers.get("x-forwarded-host")
     if forwarded_host:
         proto = request.headers.get("x-forwarded-proto", "https")
@@ -331,7 +351,7 @@ async def export_action(request: Request):
     token = export_token.issue(account_id)
     # Build the link from the public host (see public_base_url) — request.base_url
     # alone points at the internal Cloud Run host behind monday's proxy.
-    link = f"{public_base_url(request)}/audit/export?token={token}"
+    link = f"{public_base_url(request, auth)}/audit/export?token={token}"
     text = (
         f"Your VendorScreen screening audit export is ready. Download it within 15 minutes: {link}"
     )

@@ -342,6 +342,28 @@ def test_public_base_url_prefers_configured(monkeypatch):
     assert main.public_base_url(req) == "https://app.monday.app"
 
 
+def test_public_base_url_prefers_jwt_aud_origin(monkeypatch):
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    req = _FakeRequest(
+        {"x-forwarded-host": "proxy.example", "x-forwarded-proto": "https"},
+        "http://internal.a.run.app/",
+    )
+    auth = {"aud": "https://a70b7-service.us.monday.app/monday/export_action"}
+    assert main.public_base_url(req, auth) == "https://a70b7-service.us.monday.app"
+
+
+def test_public_base_url_ignores_non_url_aud(monkeypatch):
+    # aud isn't always a URL; fall through to the next source rather than emit junk.
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    req = _FakeRequest(
+        {"x-forwarded-host": "live1-service.us.monday.app", "x-forwarded-proto": "https"},
+        "http://internal.a.run.app/",
+    )
+    assert (
+        main.public_base_url(req, {"aud": "some-app-id"}) == "https://live1-service.us.monday.app"
+    )
+
+
 def test_public_base_url_falls_back_to_forwarded_host(monkeypatch):
     monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
     req = _FakeRequest(
@@ -380,6 +402,40 @@ def test_export_link_uses_forwarded_host(monkeypatch):
     assert resp.status_code == 200
     # The link points at the public monday.app host, not the internal Cloud Run URL.
     assert "https://live1-service.us.monday.app/audit/export?token=" in sent["text"]
+    assert ".a.run.app" not in sent["text"]
+
+
+def test_export_link_uses_jwt_aud_host(monkeypatch):
+    # The real monday action JWT carries the public endpoint URL in `aud`; the
+    # link must be built from that host (it differs per draft/live deployment).
+    monkeypatch.setenv("MONDAY_SIGNING_SECRET", "test-secret")
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    sent = {}
+
+    async def fake_notify(user_id, item_id, text, api_token):
+        sent["text"] = text
+
+    monkeypatch.setattr(main, "create_notification", fake_notify)
+
+    token = jwt.encode(
+        {
+            "shortLivedToken": "slt-1",
+            "accountId": 777,
+            "userId": 42,
+            "aud": "https://a70b7-service.us.monday.app/monday/export_action",
+        },
+        "test-secret",
+        algorithm="HS256",
+    )
+
+    resp = client.post(
+        EXPORT_URL,
+        json={"payload": {"inboundFieldValues": {"itemId": {"itemId": "456"}}}},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 200
+    assert "https://a70b7-service.us.monday.app/audit/export?token=" in sent["text"]
     assert ".a.run.app" not in sent["text"]
 
 
