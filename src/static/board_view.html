@@ -92,6 +92,9 @@
         padding: 24px 0;
         font-size: 14px;
       }
+      a {
+        color: var(--accent);
+      }
       .risk {
         font-weight: 600;
       }
@@ -140,24 +143,36 @@
         }
         countEl.textContent = rows.length + " screening" + (rows.length === 1 ? "" : "s");
         const head =
-          "<tr><th>Date</th><th>Vendor</th><th>Risk</th><th>Score</th><th>Match</th></tr>";
+          "<tr><th>Date</th><th>Vendor</th><th>Country</th><th>Risk</th>" +
+          "<th>Type</th><th>Score</th><th>Match</th></tr>";
         const body = rows
           .map((r) => {
             const date = (r.created_at || "").replace("T", " ").slice(0, 19);
             const risk = esc(r.risk_level);
+            let match = esc(r.match_caption);
+            if (r.match_id && r.match_caption) {
+              const url =
+                "https://www.opensanctions.org/entities/" + encodeURIComponent(r.match_id) + "/";
+              match =
+                '<a href="' + esc(url) + '" target="_blank" rel="noopener">' + match + "</a>";
+            }
             return (
               "<tr><td>" +
               esc(date) +
               "</td><td>" +
               esc(r.vendor_name) +
+              "</td><td>" +
+              esc(r.country) +
               '</td><td class="risk risk-' +
               risk +
               '">' +
               risk +
               "</td><td>" +
+              esc(r.match_type) +
+              "</td><td>" +
               esc(r.score) +
               "</td><td>" +
-              esc(r.match_caption) +
+              match +
               "</td></tr>"
             );
           })

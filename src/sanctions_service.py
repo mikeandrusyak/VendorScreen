@@ -105,6 +105,17 @@ def _is_pep(entity):
     return any("pep" in ds for ds in datasets) or any("pep" in t for t in topics) or "poi" in topics
 
 
+def _match_type(entity):
+    """Classify the driving match by what flagged it, for the audit trail:
+    'sanction' takes precedence over 'pep'; 'other' is a strong namesake with
+    neither signal (shouldn't reach a hit, but kept explicit)."""
+    if _is_sanction(entity):
+        return "sanction"
+    if _is_pep(entity):
+        return "pep"
+    return "other"
+
+
 def _classify(results, critical, warning):
     """Pick the risk level and the driving match from scored /match candidates.
 
@@ -196,6 +207,7 @@ async def match_vendor(vendor_name, country=None):
         "score": _score(match),
         "matchId": match.get("id"),
         "matchCaption": match.get("caption"),
+        "matchType": _match_type(match),
     }
 
 

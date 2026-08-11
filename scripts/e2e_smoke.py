@@ -6,14 +6,19 @@ chain against it and only promote if it passes.
 
 What it verifies (the real product flow, not mocks):
   1. the service booted             -> GET /health
-  2. resolve the caller's identity  -> monday `me { id account { id } }`
-  3. create a test item             -> monday GraphQL
-  4. trigger the action endpoint    -> POST /monday/execute_action
-  5. the app screens via /match     -> we read status + details back and assert
+  2. auth is fail-closed            -> unauthenticated POST /monday/execute_action
+                                        must return 401 (production enforcement)
+  3. resolve the caller's identity  -> monday `me { id account { id } }`
+  4. create a test item             -> monday GraphQL
+  5. trigger the action endpoint    -> POST /monday/execute_action
+  6. the app screens via /match     -> we read status + details back and assert
                                         the score-based result (P1: /match)
-  6. the audit export round-trips   -> GET /audit/export streams the CSV
-                                        containing our screening (P1: audit log)
-  7. (opt-in) the notification path -> POST /monday/export_action returns 200
+  7. the audit export round-trips   -> GET /audit/export streams the CSV
+                                        containing our screening, the country
+                                        used, and the match classification
+  8. the board view feature         -> GET /view (HTML) + session-token'd,
+                                        board-scoped /view/audit.json + .csv
+  9. (opt-in) the notification path -> POST /monday/export_action returns 200
                                         (E2E_RUN_NOTIFY=1; see the caveat below)
 
 We craft the request exactly as monday's Integration Framework would, so this
@@ -45,8 +50,12 @@ Optional:
                          expected to come back Critical)
   E2E_EXPECT_LEVEL       expected risk level for that name (default: Critical)
   E2E_COUNTRY_COLUMN     country/text column id — when set, the app is told to
-                         read it (exercises the /match country refinement)
+                         read it (exercises the /match country refinement, and
+                         the audit's stored country is then asserted)
   E2E_COUNTRY_VALUE      value written to that column before screening (default Russia)
+  MONDAY_CLIENT_SECRET   app Client Secret — enables the board-view data-endpoint
+                         checks (mints a session token). Without it, only /view
+                         HTML is checked; the rest of the board-view stage is skipped.
   E2E_ACCOUNT_ID         override the account id (default: derived from the token)
   E2E_USER_ID            override the alert recipient (default: derived from token)
   E2E_SKIP_EXPORT        set to "1" to skip the whole export section (audit CSV
@@ -81,6 +90,10 @@ COUNTRY_VALUE = os.environ.get("E2E_COUNTRY_VALUE", "Russia")
 SKIP_EXPORT = os.environ.get("E2E_SKIP_EXPORT") == "1"
 RUN_NOTIFY = os.environ.get("E2E_RUN_NOTIFY") == "1"
 KEEP_ITEMS = int(os.environ.get("E2E_KEEP_ITEMS", "20"))
+# Board-view session-token verification uses the app's CLIENT secret (distinct
+# from the signing secret). When absent, the board-view data-endpoint checks are
+# skipped rather than failing — the /view HTML check still runs.
+CLIENT_SECRET = os.environ.get("MONDAY_CLIENT_SECRET")
 
 # Export token must mirror src/export_token.py exactly (same secret, scope, and
 # claim name) so the deployed app's verify() accepts what we mint here.
@@ -160,6 +173,21 @@ def mint_export_token(account_id):
             "iat": now,
         },
         SIGNING_SECRET,
+        algorithm="HS256",
+    )
+
+
+def mint_session_token(account_id, user_id):
+    """A monday board-view session token: signed with the CLIENT secret and
+    carrying account/user under `dat`, mirroring monday.get('sessionToken') so
+    the deployed app's session_token.verify() accepts it."""
+    now = dt.datetime.now(dt.UTC)
+    return jwt.encode(
+        {
+            "dat": {"account_id": int(account_id), "user_id": int(user_id)},
+            "exp": now + dt.timedelta(seconds=300),
+        },
+        CLIENT_SECRET,
         algorithm="HS256",
     )
 
@@ -252,18 +280,105 @@ def stage_audit_csv(item_id, account_id):
     if not ctype.startswith("text/csv"):
         raise SystemExit(f"expected a text/csv export, got content-type {ctype!r}")
     body = resp.text
-    header = "created_at,board_id,item_id,vendor_name,risk_level,score,match_id,match_caption"
+    header = (
+        "created_at,board_id,item_id,vendor_name,country,risk_level,"
+        "match_type,score,match_id,match_caption"
+    )
     if header not in body:
         raise SystemExit("audit CSV is missing the expected header row")
     # The screening we just ran should appear — unless the app has no
     # DATABASE_URL (audit disabled), in which case the CSV is header-only.
-    if str(item_id) in body:
-        print("[e2e] PASS audit export — CSV contains the screening we just ran")
-    else:
+    if str(item_id) not in body:
         print(
             "[e2e] WARN audit export — CSV valid but our item is absent; "
             "is DATABASE_URL set on the deployment? (audit is skipped without it)"
         )
+        return
+
+    # (C) The enriched audit must carry the country used and the match
+    # classification. Both are deterministic here: we set the country, and a
+    # Critical result is by definition a sanctions-list hit (match_type=sanction).
+    row = next((ln for ln in body.splitlines() if str(item_id) in ln), "")
+    missing = []
+    if COUNTRY_COL and COUNTRY_VALUE not in row:
+        missing.append(f"country {COUNTRY_VALUE!r}")
+    if EXPECT_LEVEL == "Critical" and "sanction" not in row:
+        missing.append("match_type 'sanction'")
+    if missing:
+        raise SystemExit(f"audit row for item {item_id} is missing {', '.join(missing)}: {row!r}")
+    print("[e2e] PASS audit export — CSV row carries the screening, country, and classification")
+
+
+def stage_auth_enforced():
+    """(B) The deployed app must reject unauthenticated action calls in
+    production (fail-closed). A green screening stage alone doesn't prove this —
+    it always sends a valid token — so assert the negative path explicitly."""
+    body = {"payload": {"inboundFieldValues": {}}}
+    cases = [
+        ("no Authorization header", {}),
+        ("a garbage token", {"Authorization": "Bearer not-a-real-token"}),
+    ]
+    for label, headers in cases:
+        resp = httpx.post(
+            f"{APP_URL}/monday/execute_action", json=body, headers=headers, timeout=15.0
+        )
+        if resp.status_code != 401:
+            raise SystemExit(
+                f"expected 401 for {label}, got {resp.status_code} — is NODE_ENV=production "
+                "on the deployment? unauthenticated action requests must be rejected"
+            )
+    print("[e2e] PASS auth enforcement — unauthenticated action requests get 401")
+
+
+def stage_board_view(item_id, account_id, user_id):
+    """(A) The board-view feature: serves the iframe frontend and two
+    session-token-authenticated, board-scoped data endpoints. The data checks
+    need MONDAY_CLIENT_SECRET to mint a session token; without it, only the
+    /view HTML is checked."""
+    resp = httpx.get(f"{APP_URL}/view", timeout=15.0)
+    if resp.status_code != 200 or "text/html" not in resp.headers.get("content-type", ""):
+        raise SystemExit(
+            f"/view did not serve HTML: {resp.status_code} {resp.headers.get('content-type')}"
+        )
+    if "Screening Audit" not in resp.text:
+        raise SystemExit("/view HTML is missing the board-view app")
+
+    if not CLIENT_SECRET:
+        print("[e2e] SKIP board-view data endpoints — set MONDAY_CLIENT_SECRET to exercise them")
+        return
+
+    # Unauthenticated data request must be rejected.
+    resp = httpx.get(f"{APP_URL}/view/audit.json", params={"boardId": BOARD_ID}, timeout=15.0)
+    if resp.status_code != 401:
+        raise SystemExit(
+            f"/view/audit.json without a session token should be 401, got {resp.status_code}"
+        )
+
+    headers = {"Authorization": f"Bearer {mint_session_token(account_id, user_id)}"}
+    resp = httpx.get(
+        f"{APP_URL}/view/audit.json", params={"boardId": BOARD_ID}, headers=headers, timeout=20.0
+    )
+    if resp.status_code != 200:
+        raise SystemExit(
+            f"/view/audit.json with a valid session token returned {resp.status_code}: {resp.text}"
+        )
+    rows = resp.json().get("rows")
+    if rows is None:
+        raise SystemExit("/view/audit.json response has no 'rows' field")
+    if any(str(r.get("item_id")) == str(item_id) for r in rows):
+        print(f"[e2e] PASS board view — audit.json board-scoped, {len(rows)} rows incl. ours")
+    else:
+        print("[e2e] WARN board view — audit.json valid but our item absent (is DATABASE_URL set?)")
+
+    resp = httpx.get(
+        f"{APP_URL}/view/audit.csv", params={"boardId": BOARD_ID}, headers=headers, timeout=20.0
+    )
+    if resp.status_code != 200 or not resp.headers.get("content-type", "").startswith("text/csv"):
+        raise SystemExit(
+            f"/view/audit.csv should stream text/csv, got {resp.status_code} "
+            f"{resp.headers.get('content-type')}"
+        )
+    print("[e2e] PASS board view — audit.csv streams a board-scoped CSV")
 
 
 def stage_notification(item_id, user_id, account_id):
@@ -297,7 +412,10 @@ def main():
         raise SystemExit(f"health check failed: {health.status_code} {health.text}")
     print("[smoke] health OK")
 
-    # 2. Who are we acting as? (scopes metering, audit, and alerts)
+    # 2. Production auth is fail-closed: unauthenticated actions must be rejected.
+    stage_auth_enforced()
+
+    # 3. Who are we acting as? (scopes metering, audit, and alerts)
     user_id, account_id = resolve_identity()
     print(f"[e2e] acting as user {user_id}, account {account_id}")
 
@@ -324,6 +442,10 @@ def main():
                     "[e2e] SKIP notification stage — set E2E_RUN_NOTIFY=1 to run it "
                     "(live-only: personal token self-notify may be rejected in CI)"
                 )
+
+        # 7. Board view — the client-side audit feature (serves its own frontend
+        # and session-token-authenticated, board-scoped data endpoints).
+        stage_board_view(item_id, account_id, user_id)
 
         print("[e2e] PASS — all stages green")
     finally:

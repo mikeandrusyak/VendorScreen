@@ -501,7 +501,7 @@ def test_download_streams_csv_for_valid_token(monkeypatch):
 
     import datetime as dt
 
-    async def fake_list_events(account_id, limit=10_000):
+    async def fake_list_events(account_id, board_id=None, limit=10_000):
         assert account_id == 777
         return [
             {
@@ -509,7 +509,9 @@ def test_download_streams_csv_for_valid_token(monkeypatch):
                 "board_id": 123,
                 "item_id": 456,
                 "vendor_name": "Bad Actor",
+                "country": "Russia",
                 "risk_level": "Critical",
+                "match_type": "sanction",
                 "score": 0.95,
                 "match_id": "ent-1",
                 "match_caption": "Bad Actor",
@@ -525,9 +527,14 @@ def test_download_streams_csv_for_valid_token(monkeypatch):
     assert resp.headers["content-type"].startswith("text/csv")
     assert "attachment" in resp.headers["content-disposition"]
     body = resp.text
-    assert "created_at,board_id,item_id,vendor_name,risk_level,score,match_id,match_caption" in body
+    assert (
+        "created_at,board_id,item_id,vendor_name,country,risk_level,match_type,"
+        "score,match_id,match_caption" in body
+    )
     assert "Bad Actor" in body
     assert "Critical" in body
+    assert "Russia" in body
+    assert "sanction" in body
     assert "0.95" in body
 
 
@@ -578,7 +585,9 @@ def test_board_view_json_returns_board_scoped_rows(monkeypatch):
                 "board_id": 123,
                 "item_id": 456,
                 "vendor_name": "Bad Actor",
+                "country": "Russia",
                 "risk_level": "Critical",
+                "match_type": "sanction",
                 "score": 0.95,
                 "match_id": "ent-1",
                 "match_caption": "Bad Actor",
@@ -596,6 +605,8 @@ def test_board_view_json_returns_board_scoped_rows(monkeypatch):
     rows = resp.json()["rows"]
     assert len(rows) == 1
     assert rows[0]["vendor_name"] == "Bad Actor"
+    assert rows[0]["country"] == "Russia"
+    assert rows[0]["match_type"] == "sanction"
     assert rows[0]["created_at"] == "2026-07-11T09:00:00+00:00"
 
 
