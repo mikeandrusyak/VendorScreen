@@ -10,12 +10,16 @@ on:
   push:
     branches: [main]
 
-# One GLOBAL group on purpose: monday has a single shared draft version, so every
-# deploy (any PR or main) must serialize onto it — never overlap. cancel-in-
-# progress:false lets queued runs finish rather than clobbering a deploy midway.
+# Two-tier concurrency:
+# 1) Workflow-level, keyed per PR (or per branch): a new push to the SAME ref
+#    cancels its own superseded run, so a stale commit's build/deploy doesn't sit
+#    in the queue or waste a draft-deploy slot. Only ever cancels the same ref.
+# 2) The `deploy` job additionally joins a GLOBAL group (see its own concurrency
+#    block) so deploys across DIFFERENT PRs/main never overlap on monday's single
+#    shared draft version.
 concurrency:
-  group: deploy-monday
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -64,6 +68,14 @@ jobs:
       (github.event.pull_request.head.repo.full_name == github.repository &&
        github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
+    # GLOBAL serialization onto monday's single shared draft version: every
+    # deploy (any PR or main) must run one-at-a-time here. cancel-in-progress:
+    # false lets an in-flight deploy of a DIFFERENT ref finish rather than being
+    # clobbered midway — same-ref supersession is already handled by the
+    # workflow-level group above.
+    concurrency:
+      group: deploy-monday
+      cancel-in-progress: false
     outputs:
       app_url: ${{ steps.deploy.outputs.app_url }}
     env:
