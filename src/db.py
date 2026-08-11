@@ -58,6 +58,17 @@ MIGRATIONS: list[tuple[int, str]] = [
             ON screening_events (account_id, created_at DESC);
         """,
     ),
+    (
+        3,
+        # Enrich the audit for compliance value: the country used to refine the
+        # /match query, and the match classification (sanction / pep / other)
+        # derived from the matched entity's datasets/topics — a fact the risk
+        # level alone doesn't carry. Nullable so pre-existing rows stay valid.
+        """
+        ALTER TABLE screening_events ADD COLUMN IF NOT EXISTS country    TEXT;
+        ALTER TABLE screening_events ADD COLUMN IF NOT EXISTS match_type TEXT;
+        """,
+    ),
 ]
 
 

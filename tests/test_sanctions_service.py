@@ -57,6 +57,7 @@ async def test_high_score_sanction_is_critical():
 
     assert result["riskLevel"] == RISK_LEVEL["CRITICAL"]
     assert result["matchId"] == "ent-1"
+    assert result["matchType"] == "sanction"
     assert "95% match" in result["details"]
     assert "ent-1" in result["details"]
 
@@ -86,6 +87,7 @@ async def test_pep_dataset_is_warning():
     result = await match_vendor("Politician")
 
     assert result["riskLevel"] == RISK_LEVEL["WARNING"]
+    assert result["matchType"] == "pep"
 
 
 @respx.mock
