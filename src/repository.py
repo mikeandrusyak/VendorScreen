@@ -73,6 +73,33 @@ async def check_quota(account_id, period: str | None = None) -> QuotaResult | No
         return QuotaResult(allowed=True, used=used, limit=limit, plan=plan)
 
 
+async def claim_limit_notification(account_id, period: str | None = None) -> bool:
+    """Atomically claim the once-per-period 'limit reached' upgrade nudge.
+
+    Returns True for exactly the first over-limit screening in the period (its
+    caller then sends the notification), and False for every subsequent one — the
+    conditional UPDATE makes the claim race-safe across concurrent blocked
+    screenings. Returns False when the database is disabled. The usage_counters
+    row always exists here (an account can only be over-limit after check_quota
+    created and filled it), so no upsert is needed.
+    """
+    pool = db.get_pool()
+    if pool is None:
+        return False
+
+    account_id = int(account_id)
+    period = period or current_period()
+    async with pool.acquire() as conn:
+        claimed = await conn.fetchval(
+            "UPDATE usage_counters SET limit_notified = true "
+            "WHERE account_id = $1 AND period = $2 AND limit_notified = false "
+            "RETURNING 1",
+            account_id,
+            period,
+        )
+    return claimed is not None
+
+
 async def set_plan(account_id, plan: str) -> None:
     """Upsert an account's plan, driven by a monday.com subscription webhook
     event (created/changed/renewed/cancelled). No-op when the database is

@@ -69,6 +69,18 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE screening_events ADD COLUMN IF NOT EXISTS match_type TEXT;
         """,
     ),
+    (
+        4,
+        # Track whether the "monthly limit reached" upgrade nudge has already been
+        # sent for this account+period, so it fires once per period (on the first
+        # blocked screening) rather than on every over-limit item. Defaults false;
+        # existing rows are backfilled to false so a period already over its limit
+        # can still be notified on its next blocked screening.
+        """
+        ALTER TABLE usage_counters
+            ADD COLUMN IF NOT EXISTS limit_notified BOOLEAN NOT NULL DEFAULT false;
+        """,
+    ),
 ]
 
 

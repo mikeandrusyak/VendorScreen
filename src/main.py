@@ -556,11 +556,11 @@ async def _alert_critical(user_id, item_id, vendor_name, result, api_token):
 
 
 async def _alert_quota_reached(user_id, item_id, plan, limit, api_token):
-    """Notify the automation owner once, when the account spends the last
-    screening of its monthly allowance, with an upgrade nudge. Distinct from the
-    Critical alert — this is a billing/quota signal, not a risk signal — so a
-    free user actually learns they've hit the cap instead of silently getting
-    'Limit Reached' statuses. Needs a userId (absent in dev, so skipped).
+    """Notify the automation owner that the account's monthly allowance is spent,
+    with an upgrade nudge. The caller gates this to once per period (see
+    repository.claim_limit_notification). Distinct from the Critical alert — this
+    is a billing/quota signal, not a risk signal — so a free user actually learns
+    they've hit the cap instead of silently getting 'Limit Reached' statuses.
     Fail-open — a notification failure must never break the screening that ran."""
     if not user_id:
         return
@@ -663,15 +663,16 @@ async def process_vendor(
                         None,
                         {"riskLevel": RISK_LEVEL["LIMIT"]},
                     )
+                    # Nudge the owner to upgrade — once per period. The first
+                    # blocked screening claims the notification (a race-safe DB
+                    # flag), so an account that's already over its limit still gets
+                    # told, not just the single screening that crossed the cap.
+                    # Fail-open, and only when there's a user to notify.
+                    if user_id and await repository.claim_limit_notification(account_id):
+                        await _alert_quota_reached(
+                            user_id, item_id, quota.plan, quota.limit, api_token
+                        )
                     return
-
-                # Nudge the owner to upgrade exactly when this screening spends the
-                # last of the month's allowance (used == limit on an allowed run).
-                # This is the natural once-per-period trigger: the very next
-                # screening is the first to be blocked, so we alert on the
-                # transition without tracking extra state. Fail-open.
-                if quota is not None and quota.allowed and quota.used == quota.limit:
-                    await _alert_quota_reached(user_id, item_id, quota.plan, quota.limit, api_token)
 
             vendor_name = await get_item_name(item_id, api_token)
             if not vendor_name:
