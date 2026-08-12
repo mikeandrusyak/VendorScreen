@@ -22,6 +22,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Detect whether this change touches anything that actually affects the app,
+  # its tests, the build, or CI. Doc-only changes (**/*.md, LICENSE, etc.) leave
+  # `app=false`, which gates the expensive deploy/smoke below — so a README edit
+  # never burns the single shared draft-deploy slot. We gate at the JOB level (not
+  # with a workflow-level `paths:` filter) on purpose: `test`/`deploy`/`smoke` are
+  # all required status checks, and a workflow skipped by a paths filter never
+  # reports them (blocking the PR forever), whereas a job skipped by `if:` reports
+  # "skipped" — which branch protection treats as passed. `test` always runs.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            app:
+              - 'src/**'
+              - 'tests/**'
+              - 'scripts/**'
+              - 'requirements-dev.txt'
+              - 'pyproject.toml'
+              - '.github/workflows/**'
+
   test:
     runs-on: ubuntu-latest
     # Throwaway Postgres so the quota integration test runs against a real DB.
@@ -60,13 +86,17 @@ jobs:
         run: pytest -q
 
   deploy:
-    needs: test
-    # Deploy on pushes, and on PRs only when they can access secrets (same-repo,
-    # not a fork) and aren't a draft/WIP. Fork or draft PRs still run `test`.
+    needs: [test, changes]
+    # Deploy only when app/CI files actually changed (skips doc-only changes so
+    # the shared draft slot isn't burned on a README edit — this skip reports as
+    # a passed required check), AND on pushes or on PRs that can access secrets
+    # (same-repo, not a fork) and aren't a draft/WIP. Fork or draft PRs still run
+    # `test`; doc-only or fork/draft PRs simply skip `deploy`/`smoke`.
     if: >-
-      github.event_name != 'pull_request' ||
-      (github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.draft == false)
+      needs.changes.outputs.app == 'true' &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.draft == false))
     runs-on: ubuntu-latest
     # GLOBAL serialization onto monday's single shared draft version: every
     # deploy (any PR or main) must run one-at-a-time here. cancel-in-progress:
