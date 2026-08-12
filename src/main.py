@@ -110,6 +110,28 @@ def extract_auth(request: Request):
         return None
 
 
+def lifecycle_authorized(request: Request) -> bool:
+    """Authenticate a monday lifecycle / monetization webhook (install, uninstall,
+    subscription events).
+
+    Unlike action/trigger requests (Signing Secret), monday signs these with the
+    app's *Client Secret* — but the two are easy to confuse and monday's exact
+    signing for this endpoint isn't crisply documented, so accept a JWT that
+    validates under *either* app-owned secret. Both are secrets only monday and we
+    hold, so either proves authenticity. In non-production (local dev) auth is not
+    enforced, matching extract_auth.
+    """
+    if NODE_ENV != "production":
+        return True
+    auth_header = request.headers.get("authorization")
+    if not auth_header:
+        return False
+    if extract_auth(request) is not None:
+        return True
+    token = auth_header.replace("Bearer ", "")
+    return session_token.verify(token) is not None
+
+
 def field_value(field, *keys):
     """Unwrap an inboundFieldValues entry that may be a primitive or an object
     wrapper (e.g. {"columnId": "status"}). Returns the first matching key, or
@@ -238,14 +260,32 @@ async def subscription_webhook(request: Request):
     if body.get("challenge"):
         return {"challenge": body["challenge"]}
 
-    if NODE_ENV == "production" and extract_auth(request) is None:
+    if not lifecycle_authorized(request):
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
 
     event_type = (body.get("type") or "").lower()
     data = body.get("data") or {}
     account_id = data.get("account_id")
 
-    if not account_id or "subscription" not in event_type:
+    if not account_id:
+        return {}
+
+    # Uninstall lands on this same monetization webhook (monday sends `uninstall`
+    # alongside `app_subscription_cancelled`). It's our trigger to permanently
+    # delete everything we hold for the account — audit log, counters, account
+    # row — so the marketplace "delete all end-user data on uninstall" obligation
+    # is met. Purge is idempotent, so the paired cancel event doing its own thing
+    # below is harmless.
+    if "uninstall" in event_type:
+        try:
+            purged = await repository.purge_account(account_id)
+            log.info("[uninstall] account %s data purged (db_enabled=%s)", account_id, purged)
+        except Exception as err:
+            log.error("[uninstall] failed to purge account %s: %s", account_id, err)
+            sentry_sdk.capture_exception(err)
+        return {}
+
+    if "subscription" not in event_type:
         return {}
 
     subscription = data.get("subscription")

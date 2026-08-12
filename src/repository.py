@@ -91,6 +91,32 @@ async def set_plan(account_id, plan: str) -> None:
         )
 
 
+async def purge_account(account_id) -> bool:
+    """Permanently delete every row we hold for one account — the audit log,
+    usage counters, and the account record itself.
+
+    Called when monday reports the app was uninstalled from that account, to
+    satisfy the marketplace requirement that all end-user data be deleted after
+    uninstall. Returns True when a purge ran, False when the database is disabled
+    (nothing is stored, so there's nothing to delete). No-op / fail-open on a
+    disabled DB, mirroring the rest of this module.
+
+    The three deletes run in one transaction so a partial purge can't leave, say,
+    audit rows behind after the account row is gone.
+    """
+    pool = db.get_pool()
+    if pool is None:
+        return False
+
+    account_id = int(account_id)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM screening_events WHERE account_id = $1", account_id)
+            await conn.execute("DELETE FROM usage_counters WHERE account_id = $1", account_id)
+            await conn.execute("DELETE FROM accounts WHERE account_id = $1", account_id)
+    return True
+
+
 async def record_event(
     *,
     account_id,

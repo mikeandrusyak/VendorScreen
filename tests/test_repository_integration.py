@@ -100,6 +100,72 @@ async def test_record_and_list_events_roundtrip(monkeypatch):
         await db.close_db()
 
 
+async def test_purge_account_deletes_all_tenant_rows(monkeypatch):
+    # Proves the uninstall purge removes an account's audit rows, usage counter,
+    # and account record — and leaves a different account untouched.
+    monkeypatch.setenv("DATABASE_URL", TEST_DB_URL)
+    await db.init_db()
+
+    account_id = 900_000_000 + (uuid.uuid4().int % 1_000_000)
+    other_account = account_id + 1
+    period = "itest-" + uuid.uuid4().hex[:8]
+    pool = db.get_pool()
+    try:
+        # Populate all three tables for the target account, plus a bystander.
+        await repository.check_quota(account_id, period=period)  # accounts + counter
+        await repository.record_event(
+            account_id=account_id,
+            board_id=123,
+            item_id=1,
+            vendor_name="Doomed Vendor",
+            risk_level="Clear",
+        )
+        await repository.record_event(
+            account_id=other_account,
+            board_id=999,
+            item_id=2,
+            vendor_name="Survivor",
+            risk_level="Clear",
+        )
+
+        purged = await repository.purge_account(account_id)
+        assert purged is True
+
+        async with pool.acquire() as conn:
+            events = await conn.fetchval(
+                "SELECT count(*) FROM screening_events WHERE account_id = $1", account_id
+            )
+            counters = await conn.fetchval(
+                "SELECT count(*) FROM usage_counters WHERE account_id = $1", account_id
+            )
+            accounts = await conn.fetchval(
+                "SELECT count(*) FROM accounts WHERE account_id = $1", account_id
+            )
+            survivor = await conn.fetchval(
+                "SELECT count(*) FROM screening_events WHERE account_id = $1", other_account
+            )
+        assert events == 0
+        assert counters == 0
+        assert accounts == 0
+        # A different tenant's data is not touched by the purge.
+        assert survivor == 1
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM screening_events WHERE account_id = ANY($1::bigint[])",
+                [account_id, other_account],
+            )
+            await conn.execute(
+                "DELETE FROM usage_counters WHERE account_id = ANY($1::bigint[])",
+                [account_id, other_account],
+            )
+            await conn.execute(
+                "DELETE FROM accounts WHERE account_id = ANY($1::bigint[])",
+                [account_id, other_account],
+            )
+        await db.close_db()
+
+
 async def test_set_plan_upgrades_then_downgrades_account(monkeypatch):
     # Mirrors a monday subscription webhook: created (free -> pro), then
     # cancelled (pro -> free), and check_quota must reflect it immediately.
