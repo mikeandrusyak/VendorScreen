@@ -555,6 +555,28 @@ async def _alert_critical(user_id, item_id, vendor_name, result, api_token):
         sentry_sdk.capture_exception(err)
 
 
+async def _alert_quota_reached(user_id, item_id, plan, limit, api_token):
+    """Notify the automation owner once, when the account spends the last
+    screening of its monthly allowance, with an upgrade nudge. Distinct from the
+    Critical alert — this is a billing/quota signal, not a risk signal — so a
+    free user actually learns they've hit the cap instead of silently getting
+    'Limit Reached' statuses. Needs a userId (absent in dev, so skipped).
+    Fail-open — a notification failure must never break the screening that ran."""
+    if not user_id:
+        return
+    text = (
+        f"🔔 VendorScreen: you've used all {limit} screenings on the {plan} plan "
+        "this month. New vendors won't be screened until the next period — "
+        "upgrade your plan for a higher monthly limit."
+    )
+    try:
+        await create_notification(user_id, item_id, text, api_token)
+        log.info("[quota] limit-reached alert sent to user %s (plan %s)", user_id, plan)
+    except Exception as err:
+        log.error("[quota] failed to send limit-reached alert to user %s: %s", user_id, err)
+        sentry_sdk.capture_exception(err)
+
+
 async def _mark_unavailable(
     board_id, item_id, status_column_id, details_column_id, api_token, account_id, vendor_name
 ):
@@ -622,7 +644,9 @@ async def process_vendor(
                         item_id=item_id,
                         status_column_id=status_column_id,
                         details_column_id=details_column_id,
-                        risk_level=RISK_LEVEL["UNAVAILABLE"],
+                        # Distinct 'Limit Reached' label (not 'Screening Failed') so a
+                        # billing stop is visibly different from a service outage.
+                        risk_level=RISK_LEVEL["LIMIT"],
                         details=with_disclaimer(
                             f"Monthly screening limit reached for the {quota.plan} plan "
                             f"({quota.limit}/month). This item was not screened — upgrade "
@@ -637,9 +661,17 @@ async def process_vendor(
                         board_id,
                         item_id,
                         None,
-                        {"riskLevel": RISK_LEVEL["UNAVAILABLE"]},
+                        {"riskLevel": RISK_LEVEL["LIMIT"]},
                     )
                     return
+
+                # Nudge the owner to upgrade exactly when this screening spends the
+                # last of the month's allowance (used == limit on an allowed run).
+                # This is the natural once-per-period trigger: the very next
+                # screening is the first to be blocked, so we alert on the
+                # transition without tracking extra state. Fail-open.
+                if quota is not None and quota.allowed and quota.used == quota.limit:
+                    await _alert_quota_reached(user_id, item_id, quota.plan, quota.limit, api_token)
 
             vendor_name = await get_item_name(item_id, api_token)
             if not vendor_name:

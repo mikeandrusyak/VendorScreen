@@ -35,13 +35,17 @@ SCORE_WARNING_DEFAULT = 0.70
 
 # Risk level constants matching Monday.com status column labels. UNAVAILABLE is
 # written when screening could not be completed (OpenSanctions down) so the
-# result is never silently lost — Monday auto-creates the label
-# (create_labels_if_missing) and the client can see it needs a re-run.
+# result is never silently lost; LIMIT is written when the account's monthly
+# quota is exhausted — a distinct label so a billing stop reads differently from
+# a technical failure (and so the customer sees *why* the item wasn't screened).
+# Monday auto-creates any missing label (create_labels_if_missing), so the client
+# sees the state with no setup.
 RISK_LEVEL = {
     "CLEAR": "Clear",
     "WARNING": "Warning",
     "CRITICAL": "Critical",
     "UNAVAILABLE": "Screening Failed",
+    "LIMIT": "Limit Reached",
 }
 
 
