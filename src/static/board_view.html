@@ -134,6 +134,15 @@
         );
       }
 
+      // Display the 0–1 match score as a whole percentage (e.g. 0.836 -> "84%").
+      // Empty for Clear / no-match rows where there is no score. Export CSV keeps
+      // the raw number for spreadsheet analysis.
+      function fmtScore(score) {
+        if (score == null || score === "") return "";
+        const n = Number(score);
+        return Number.isFinite(n) ? Math.round(n * 100) + "%" : "";
+      }
+
       function renderTable(rows) {
         if (!rows.length) {
           content.innerHTML =
@@ -170,7 +179,7 @@
               "</td><td>" +
               esc(r.match_type) +
               "</td><td>" +
-              esc(r.score) +
+              esc(fmtScore(r.score)) +
               "</td><td>" +
               match +
               "</td></tr>"
