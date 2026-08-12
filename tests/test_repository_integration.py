@@ -48,6 +48,34 @@ async def test_quota_allows_exactly_limit_then_blocks(monkeypatch):
         await db.close_db()
 
 
+async def test_limit_notification_claimed_once_per_period(monkeypatch):
+    # The upgrade nudge is claimable exactly once per account+period: the first
+    # blocked screening wins the claim, every later one gets False (no spam).
+    monkeypatch.setenv("DATABASE_URL", TEST_DB_URL)
+    await db.init_db()
+
+    account_id = 900_000_000 + (uuid.uuid4().int % 1_000_000)
+    period = "itest-" + uuid.uuid4().hex[:8]
+    pool = db.get_pool()
+    try:
+        # The counter row must exist first — claim never upserts. One screening
+        # creates it.
+        await repository.check_quota(account_id, period=period)
+
+        first = await repository.claim_limit_notification(account_id, period=period)
+        second = await repository.claim_limit_notification(account_id, period=period)
+        third = await repository.claim_limit_notification(account_id, period=period)
+
+        assert first is True
+        assert second is False
+        assert third is False
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM usage_counters WHERE account_id = $1", account_id)
+            await conn.execute("DELETE FROM accounts WHERE account_id = $1", account_id)
+        await db.close_db()
+
+
 async def test_record_and_list_events_roundtrip(monkeypatch):
     # Proves the audit log persists a trimmed summary and reads it back newest
     # first, scoped to the account.

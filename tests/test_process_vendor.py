@@ -46,16 +46,20 @@ async def test_over_limit_marks_board_and_skips_screening(monkeypatch):
     assert "limit" in calls["update"]["details"].lower()
 
 
-async def test_at_limit_sends_one_time_upgrade_alert(monkeypatch):
-    # The screening that spends the last of the allowance (used == limit) should
-    # fire a single upgrade nudge to the automation owner.
+async def test_first_block_sends_one_time_upgrade_alert(monkeypatch):
+    # The first blocked screening of the period claims the notification and nudges
+    # the owner to upgrade — even for an account already over its limit.
     monkeypatch.setattr(main.db, "is_configured", lambda: True)
 
     async def fake_quota(account_id):
-        return QuotaResult(allowed=True, used=50, limit=50, plan="free")
+        return QuotaResult(allowed=False, used=20, limit=20, plan="free")
+
+    async def fake_claim(account_id):
+        return True
 
     monkeypatch.setattr(main.repository, "check_quota", fake_quota)
-    _stub_screening(monkeypatch, result={"riskLevel": "Clear", "details": "ok"})
+    monkeypatch.setattr(main.repository, "claim_limit_notification", fake_claim)
+    _stub_screening(monkeypatch)
 
     sent = {}
 
@@ -69,6 +73,33 @@ async def test_at_limit_sends_one_time_upgrade_alert(monkeypatch):
 
     assert sent["user_id"] == "42"
     assert "upgrade" in sent["text"].lower()
+
+
+async def test_subsequent_block_does_not_realert(monkeypatch):
+    # Once the claim is taken this period (claim returns False), further blocked
+    # screenings stay silent — no notification spam.
+    monkeypatch.setattr(main.db, "is_configured", lambda: True)
+
+    async def fake_quota(account_id):
+        return QuotaResult(allowed=False, used=20, limit=20, plan="free")
+
+    async def fake_claim(account_id):
+        return False
+
+    monkeypatch.setattr(main.repository, "check_quota", fake_quota)
+    monkeypatch.setattr(main.repository, "claim_limit_notification", fake_claim)
+    _stub_screening(monkeypatch)
+
+    sent = {}
+
+    async def fake_notify(user_id, item_id, text, api_token):
+        sent["called"] = True
+
+    monkeypatch.setattr(main, "create_notification", fake_notify)
+
+    await main.process_vendor("b", "i", "s", "d", "tok", account_id="123", user_id="42")
+
+    assert "called" not in sent
 
 
 async def test_under_limit_does_not_alert(monkeypatch):
