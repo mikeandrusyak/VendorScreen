@@ -81,6 +81,24 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
+@app.middleware("http")
+async def flush_sentry_before_response(request: Request, call_next):
+    """Force Sentry's event queue to drain before the response goes out.
+
+    monday Code runs on Cloud Run, which freezes the container's CPU right
+    after the response is sent. Sentry normally ships events on a background
+    thread, so a send still in flight at that instant gets frozen mid-TLS-
+    handshake and fails with SSLEOFError on the next request — silently
+    dropping the event. Flushing synchronously here (off the event loop
+    thread, so it doesn't block other concurrent requests) keeps event
+    delivery inside the window the CPU is guaranteed to be active. No-op
+    when Sentry isn't initialized (SENTRY_DSN unset).
+    """
+    response = await call_next(request)
+    await asyncio.to_thread(sentry_sdk.flush, 2.0)
+    return response
+
+
 def extract_auth(request: Request):
     """Return the decoded JWT payload (contains shortLivedToken) or None if invalid.
 
