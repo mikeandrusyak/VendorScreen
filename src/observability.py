@@ -32,13 +32,14 @@ def init_sentry(environment):
         send_default_pii=False,
     )
 
-    # The Sentry SDK's background transport retries failed envelope uploads
-    # via urllib3, which logs each retry at WARNING level. In monday Code's
-    # sandbox, outbound connections to sentry.io occasionally drop mid-TLS-
-    # handshake (SSLEOFError) — harmless since Sentry init is fail-open, but
-    # urllib3's logger propagates to the root logger configured in main.py
-    # and floods application logs with confusing retry noise. Silence it;
-    # this doesn't change retry behavior, only what gets logged.
+    # The Sentry SDK ships events on a background thread (urllib3-based
+    # transport). monday Code runs on Cloud Run, which freezes a container's
+    # CPU right after the HTTP response is sent — if that background send is
+    # still mid-TLS-handshake when the freeze hits, it resumes on a dead
+    # socket and fails with SSLEOFError, logged by urllib3 at WARNING level.
+    # main.py's flush-before-response middleware (see main.py) is the actual
+    # fix for the dropped/delayed events; this just keeps urllib3's inherent
+    # retry chatter out of application logs regardless.
     logging.getLogger("urllib3").setLevel(logging.ERROR)
 
     log.info("[observability] Sentry initialized (environment=%s)", environment)
