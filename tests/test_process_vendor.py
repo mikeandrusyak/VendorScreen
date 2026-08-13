@@ -378,6 +378,35 @@ async def test_unexpected_error_marks_board_failed(monkeypatch):
     assert calls["update"]["risk_level"] == "Screening Failed"
 
 
+async def test_pending_status_written_before_screening(monkeypatch):
+    # The board should get an immediate 'Screening…' status before the
+    # (potentially slow) OpenSanctions call, so a board button click doesn't
+    # look like nothing happened.
+    monkeypatch.setattr(main.db, "is_configured", lambda: False)
+
+    updates = []
+
+    async def fake_get_item_name(item_id, api_token):
+        return "Acme"
+
+    async def fake_check(vendor_name, country=None):
+        # The pending write must have already landed by the time the
+        # (slow) screening call runs.
+        assert updates and updates[0]["risk_level"] == "Screening…"
+        return {"riskLevel": "Clear", "details": "ok"}
+
+    async def fake_update(**kw):
+        updates.append(kw)
+
+    monkeypatch.setattr(main, "get_item_name", fake_get_item_name)
+    monkeypatch.setattr(main, "check_vendor_with_retry", fake_check)
+    monkeypatch.setattr(main, "update_vendor_record", fake_update)
+
+    await main.process_vendor("b", "i", "s", "d", "tok")
+
+    assert [u["risk_level"] for u in updates] == ["Screening…", "Clear"]
+
+
 async def test_no_account_id_skips_quota_entirely(monkeypatch):
     # Dev requests have no account — quota must not even be consulted.
     monkeypatch.setattr(main.db, "is_configured", lambda: True)
