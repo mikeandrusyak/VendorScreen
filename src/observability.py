@@ -31,5 +31,15 @@ def init_sentry(environment):
         traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0")),
         send_default_pii=False,
     )
+
+    # The Sentry SDK's background transport retries failed envelope uploads
+    # via urllib3, which logs each retry at WARNING level. In monday Code's
+    # sandbox, outbound connections to sentry.io occasionally drop mid-TLS-
+    # handshake (SSLEOFError) — harmless since Sentry init is fail-open, but
+    # urllib3's logger propagates to the root logger configured in main.py
+    # and floods application logs with confusing retry noise. Silence it;
+    # this doesn't change retry behavior, only what gets logged.
+    logging.getLogger("urllib3").setLevel(logging.ERROR)
+
     log.info("[observability] Sentry initialized (environment=%s)", environment)
     return True
