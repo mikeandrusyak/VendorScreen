@@ -32,6 +32,7 @@ from sanctions_service import (
     RISK_LEVEL,
     SanctionsUnavailableError,
     check_vendor_with_retry,
+    pending_result,
     unavailable_result,
     with_disclaimer,
 )
@@ -602,6 +603,29 @@ async def _mark_unavailable(
         sentry_sdk.capture_exception(update_err)
 
 
+async def _mark_pending(board_id, item_id, status_column_id, details_column_id, api_token):
+    """Write the interim 'Screening…' status the moment a check starts, before
+    the OpenSanctions call, so the person who clicked the automation sees
+    immediate feedback instead of an unchanged board during the check (which
+    can take from ~1s up to tens of seconds under retry/backoff). Best-effort:
+    never raises or blocks the real screening — a failed interim write just
+    means the board goes straight from blank to the final result, same as
+    before this existed."""
+    result = pending_result()
+    try:
+        await update_vendor_record(
+            board_id=board_id,
+            item_id=item_id,
+            status_column_id=status_column_id,
+            details_column_id=details_column_id,
+            risk_level=result["riskLevel"],
+            details=result["details"],
+            api_token=api_token,
+        )
+    except Exception as err:
+        log.warning("[vendor] Could not write pending status for item %s: %s", item_id, err)
+
+
 async def process_vendor(
     board_id,
     item_id,
@@ -673,6 +697,11 @@ async def process_vendor(
                             user_id, item_id, quota.plan, quota.limit, api_token
                         )
                     return
+
+            # Interim status so the person who clicked the automation gets
+            # immediate feedback — the OpenSanctions call below (with retries)
+            # can otherwise leave the board looking unchanged for a while.
+            await _mark_pending(board_id, item_id, status_column_id, details_column_id, api_token)
 
             vendor_name = await get_item_name(item_id, api_token)
             if not vendor_name:
