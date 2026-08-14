@@ -9,7 +9,7 @@ These Terms of Service ("**Terms**") govern access to and use of the **VendorScr
 
 ## 1. Description of the Service
 
-The Application is an **informational screening tool**. When an item (a "vendor") is created or updated on a connected monday.com board, the Application submits the vendor name to the OpenSanctions data service, evaluates the response, and writes an indicative risk level (**Clear**, **Warning**, or **Critical**) together with supporting notes back to the board. Depending on your plan, the Application may also maintain an exportable audit trail of past screenings and send you a notification when a vendor screens as Critical.
+The Application is an **informational screening tool**. When a screening is triggered for an item (a "vendor") on a connected monday.com board — for example when the item is created or when you run the screening action (such as by clicking a button) — the Application submits the vendor name, and optionally the vendor's country if you have mapped a country column, to the OpenSanctions data service, evaluates the response, and writes an indicative risk level (**Clear**, **Warning**, or **Critical**) together with supporting notes back to the board. Depending on your plan, the Application may also maintain an exportable audit trail of past screenings and send you a notification when a vendor screens as Critical.
 
 ## 2. Informational Purpose Only — No Decision-Making (IMPORTANT)
 
