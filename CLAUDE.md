@@ -6,7 +6,7 @@ Guidance for Claude Code (and other agents) working in this repo.
 
 VendorScreen is a **monday.com marketplace app**: a multi-tenant integration recipe that screens newly-added vendor items against sanction/PEP lists (via OpenSanctions) and writes the result back to columns the customer chose. It is not tied to any specific board — board/column IDs always come from the recipe payload at runtime, never from `.env`.
 
-Full product/architecture description: [README.md](README.md). Pricing/plan logic: [MONETIZATION.md](MONETIZATION.md). Pre-promotion checklist: [SMOKE_TEST.md](SMOKE_TEST.md). `TECH_SPEC.md` is an early draft and is **stale** (references a single-tenant `/webhook` endpoint and env vars that no longer exist) — trust README.md over it.
+Full product/architecture description: [README.md](README.md). Pricing/plan logic: [MONETIZATION.md](MONETIZATION.md). Pre-promotion checklist: [SMOKE_TEST.md](SMOKE_TEST.md).
 
 ## Layout
 
