@@ -1,7 +1,7 @@
 # Privacy Policy — VendorScreen
 
 **Effective date:** 2026-07-03
-**Last updated:** 2026-08-12
+**Last updated:** 2026-08-14
 
 This Privacy Policy explains how the **VendorScreen** application ("**Application**"), operated by `Andrusiak Mykhailo`, an independent individual developer ("**we**", "**us**"), processes data when installed on a monday.com account. The Application is a business-to-business tool. In most cases the Customer (the organization installing the Application) is the **data controller** and we act as a **data processor** on the Customer's behalf.
 
@@ -32,7 +32,7 @@ We do **not** sell your data, use it for advertising, or use it to build profile
 
 ## 3. Third-Party Data Sharing (IMPORTANT)
 
-To perform screening, the Application transmits the **vendor name** to **OpenSanctions** (`https://api.opensanctions.org`), a third-party sanctions and PEP data provider. This transfer is necessary to deliver the Service. OpenSanctions processes the query under its own terms and privacy policy. No monday.com item content other than the vendor name is sent to OpenSanctions.
+To perform screening, the Application transmits the **vendor name** — and, if you have mapped a country column, the vendor's **country** — to **OpenSanctions** (`https://api.opensanctions.org`), a third-party sanctions and PEP data provider. This transfer is necessary to deliver the Service. OpenSanctions processes the query under its own terms and privacy policy. No monday.com item content other than the vendor name and, where mapped, the country is sent to OpenSanctions.
 
 The Application runs within **monday.com's serverless environment (monday code)**; board updates are sent to the **monday.com API**. The persistent audit record and usage-metering data (Section 1) are stored in a **managed PostgreSQL database (Neon, `https://neon.com`)**, which acts as a sub-processor hosting that data on our behalf. Error diagnostics may be sent to **Sentry (`https://sentry.io`)** for reliability monitoring; Sentry is configured **not** to receive personal data (`send_default_pii=False`). We do not transfer your data to any other third party except as required by law.
 

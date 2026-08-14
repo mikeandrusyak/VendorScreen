@@ -1,7 +1,7 @@
 # Terms of Service — VendorScreen
 
 **Effective date:** 2026-07-03
-**Last updated:** 2026-07-03
+**Last updated:** 2026-08-14
 
 These Terms of Service ("**Terms**") govern access to and use of the **VendorScreen** application ("**Application**", "**Service**") distributed through the monday.com marketplace and operated by `Andrusiak Mykhailo`, an independent individual developer ("**Provider**", "**we**", "**us**"). The Application is intended solely for use by businesses and their authorized representatives ("**Customer**", "**you**"). By installing, accessing, or using the Application, you agree to these Terms on behalf of the organization you represent. If you do not have authority to bind that organization, or you do not agree, do not use the Application.
 
@@ -9,7 +9,7 @@ These Terms of Service ("**Terms**") govern access to and use of the **VendorScr
 
 ## 1. Description of the Service
 
-The Application is an **informational screening tool**. When an item (a "vendor") is created or updated on a connected monday.com board, the Application submits the vendor name to the OpenSanctions data service, evaluates the response, and writes an indicative risk level (**Clear**, **Warning**, or **Critical**) together with supporting notes back to the board.
+The Application is an **informational screening tool**. When a screening is triggered for an item (a "vendor") on a connected monday.com board — for example when the item is created or when you run the screening action (such as by clicking a button) — the Application submits the vendor name, and optionally the vendor's country if you have mapped a country column, to the OpenSanctions data service, evaluates the response, and writes an indicative risk level (**Clear**, **Warning**, or **Critical**) together with supporting notes back to the board. Depending on your plan, the Application may also maintain an exportable audit trail of past screenings and send you a notification when a vendor screens as Critical.
 
 ## 2. Informational Purpose Only — No Decision-Making (IMPORTANT)
 
@@ -29,38 +29,48 @@ The Application is an **informational screening tool**. When an item (a "vendor"
 
 **3.3** The Customer represents that it has a lawful basis and any necessary authority to submit the vendor data it processes through the Application (see the Privacy Policy).
 
-## 4. Third-Party Services
+## 4. Subscription Plans, Fees, and Usage Limits
 
-The Application relies on **OpenSanctions** (data provider) and the **monday.com** platform (host and delivery channel). We do not control these services and are not responsible for their availability, accuracy, completeness, or terms. Your use of monday.com remains governed by your agreement with monday.com.
+**4.1** The Application is offered under multiple subscription plans, including a free plan, each with its own monthly screening allowance and feature set, as presented on the marketplace listing. All fees, if any, are billed, collected, and refunded exclusively through monday.com's built-in Monetization platform; the Provider does not process payments directly and does not receive or store your payment card details.
 
-## 5. Acceptable Use
+**4.2** Your active plan and screening allowance are those reported to us by monday.com's Monetization system and take effect once that notification is received; there may be a short delay between a change on monday.com and its effect in the Application. Monthly allowances reset on a calendar-month basis.
+
+**4.3** Once a plan's monthly screening allowance is exhausted, the Application will decline to run further screenings — marking the affected item so you can upgrade or wait for the next period — until the allowance resets or the plan is upgraded. This is expected behavior, not a service failure, and does not entitle the Customer to a refund or credit.
+
+**4.4** Upgrades, downgrades, renewals, and cancellations of a subscription are made through monday.com and are governed by monday.com's marketplace and Monetization terms. Uninstalling the Application ends metering and, as described in the Privacy Policy, triggers deletion of the Customer's stored data.
+
+## 5. Third-Party Services
+
+The Application relies on **OpenSanctions** (data provider) and the **monday.com** platform (host, billing, and delivery channel). We do not control these services and are not responsible for their availability, accuracy, completeness, or terms. Your use of monday.com remains governed by your agreement with monday.com.
+
+## 6. Acceptable Use
 
 You agree not to: (a) use the Application as the sole basis for any legal, credit, employment, or eligibility decision; (b) reverse-engineer, resell, or sublicense the Application except as permitted by the marketplace agreement; (c) submit data you are not authorized to process; or (d) use the Application to violate any law or the rights of any third party.
 
-## 6. Disclaimer of Warranties
+## 7. Disclaimer of Warranties
 
 THE APPLICATION IS PROVIDED **"AS IS"** AND **"AS AVAILABLE"**, WITHOUT WARRANTIES OF ANY KIND, WHETHER EXPRESS, IMPLIED, OR STATUTORY, INCLUDING WITHOUT LIMITATION WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, ACCURACY, COMPLETENESS, AND NON-INFRINGEMENT. WE DO NOT WARRANT THAT SCREENING RESULTS ARE ACCURATE, COMPLETE, CURRENT, OR ERROR-FREE, OR THAT THE APPLICATION WILL BE UNINTERRUPTED.
 
-## 7. Limitation of Liability
+## 8. Limitation of Liability
 
 TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE PROVIDER SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR FOR ANY LOSS OF PROFITS, REVENUE, DATA, GOODWILL, OR REGULATORY PENALTIES, ARISING OUT OF OR RELATED TO THE USE OF, OR INABILITY TO USE, THE APPLICATION — INCLUDING RELIANCE ON ANY SCREENING RESULT. THE PROVIDER'S TOTAL AGGREGATE LIABILITY UNDER THESE TERMS SHALL NOT EXCEED THE GREATER OF (a) THE FEES PAID BY THE CUSTOMER FOR THE APPLICATION IN THE THREE (3) MONTHS PRECEDING THE EVENT GIVING RISE TO THE CLAIM, OR (b) USD 100.
 
-## 8. Indemnification
+## 9. Indemnification
 
 The Customer agrees to indemnify and hold harmless the Provider from any claims, losses, and expenses arising out of the Customer's use of the Application, the Customer's decisions, or the Customer's breach of these Terms or of applicable law.
 
-## 9. Term and Termination
+## 10. Term and Termination
 
-These Terms apply for as long as the Application is installed. Either party may terminate by uninstalling or discontinuing the Application. Sections 2, 3, and 6–8 survive termination.
+These Terms apply for as long as the Application is installed. Either party may terminate by uninstalling or discontinuing the Application. Sections 2, 3, and 7–9 survive termination.
 
-## 10. Changes to These Terms
+## 11. Changes to These Terms
 
 We may update these Terms. Material changes will be reflected by updating the "Last updated" date and, where required, through the marketplace listing. Continued use after changes constitutes acceptance.
 
-## 11. Governing Law
+## 12. Governing Law
 
 These Terms are governed by the laws of `Switzerland` (the Provider's country of residence), without regard to its conflict-of-laws rules. This will be updated if the Provider incorporates in another jurisdiction.
 
-## 12. Contact
+## 13. Contact
 
 `Andrusiak Mykhailo` (independent developer) — andrusyakmd@gmail.com
