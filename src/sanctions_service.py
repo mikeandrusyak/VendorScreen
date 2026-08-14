@@ -46,7 +46,6 @@ RISK_LEVEL = {
     "CRITICAL": "Critical",
     "UNAVAILABLE": "Screening Failed",
     "LIMIT": "Limit Reached",
-    "PENDING": "Screening…",
 }
 
 
@@ -83,21 +82,6 @@ def unavailable_result():
             "Screening could not be completed — the OpenSanctions service was "
             "temporarily unavailable. Re-run the automation to try again."
         ),
-    }
-
-
-def pending_result():
-    """Interim result written to the board the moment a screening starts.
-
-    The real check runs in the background and can take anywhere from ~1s to
-    tens of seconds (retries/backoff against OpenSanctions — see
-    check_vendor_with_retry). Without this, the Status/Details columns stay
-    unchanged for that whole window and the person who clicked the automation
-    has no way to tell it's running versus not wired up at all.
-    """
-    return {
-        "riskLevel": RISK_LEVEL["PENDING"],
-        "details": "Screening in progress — this will update automatically in a few seconds.",
     }
 
 
