@@ -32,7 +32,6 @@ from sanctions_service import (
     RISK_LEVEL,
     SanctionsUnavailableError,
     check_vendor_with_retry,
-    pending_result,
     unavailable_result,
     with_disclaimer,
 )
@@ -54,11 +53,12 @@ NODE_ENV = os.getenv("NODE_ENV") or "production"
 # wraps it. No-op unless SENTRY_DSN is set.
 init_sentry(NODE_ENV)
 
-# Max 3 concurrent vendor checks — prevents flooding OpenSanctions during bulk imports
+# Cap concurrent OpenSanctions calls across simultaneous inbound requests (e.g. a
+# bulk item import fans out into many parallel action calls) so we don't flood the
+# API and trip its rate limit. Each screening now runs inline within its request
+# (see execute_action), so this bounds real in-flight work, not detached tasks.
 CONCURRENCY = 3
 vendor_semaphore = asyncio.Semaphore(CONCURRENCY)
-# Keep strong references to background tasks so they aren't garbage-collected
-background_tasks: set[asyncio.Task] = set()
 
 
 @asynccontextmanager
@@ -237,23 +237,25 @@ async def execute_action(request: Request):
             },
         )
 
-    # Enqueue compliance check — max 3 concurrent to avoid rate limiting.
-    # Respond immediately: Monday times out if we wait for the full check.
-    task = asyncio.create_task(
-        process_vendor(
-            board_id,
-            item_id,
-            status_column_id,
-            details_column_id,
-            api_token,
-            account_id=account_id,
-            country_column_id=country_column_id,
-            user_id=user_id,
-        )
+    # Screen inline, within this request, then respond. This MUST NOT be turned
+    # back into a detached background task (asyncio.create_task + early return):
+    # monday Code runs on Cloud Run, which allocates CPU only while a request is
+    # in flight and throttles it to ~zero once the response is sent. A backgrounded
+    # screening then crawls — every await stalls ~15s waiting for CPU scraps,
+    # turning a ~3s check into ~90s (observed). Running it inline keeps the CPU
+    # allocated the whole time. It fits the timing budget comfortably: the work is
+    # ~2-3s, monday's synchronous action window is ~60s, and Cloud Run's request
+    # timeout is 300s.
+    await process_vendor(
+        board_id,
+        item_id,
+        status_column_id,
+        details_column_id,
+        api_token,
+        account_id=account_id,
+        country_column_id=country_column_id,
+        user_id=user_id,
     )
-    background_tasks.add(task)
-    task.add_done_callback(background_tasks.discard)
-    log.info("[queue] pending=%d", len(background_tasks))
 
     return {}
 
@@ -621,29 +623,6 @@ async def _mark_unavailable(
         sentry_sdk.capture_exception(update_err)
 
 
-async def _mark_pending(board_id, item_id, status_column_id, details_column_id, api_token):
-    """Write the interim 'Screening…' status the moment a check starts, before
-    the OpenSanctions call, so the person who clicked the automation sees
-    immediate feedback instead of an unchanged board during the check (which
-    can take from ~1s up to tens of seconds under retry/backoff). Best-effort:
-    never raises or blocks the real screening — a failed interim write just
-    means the board goes straight from blank to the final result, same as
-    before this existed."""
-    result = pending_result()
-    try:
-        await update_vendor_record(
-            board_id=board_id,
-            item_id=item_id,
-            status_column_id=status_column_id,
-            details_column_id=details_column_id,
-            risk_level=result["riskLevel"],
-            details=result["details"],
-            api_token=api_token,
-        )
-    except Exception as err:
-        log.warning("[vendor] Could not write pending status for item %s: %s", item_id, err)
-
-
 async def process_vendor(
     board_id,
     item_id,
@@ -715,11 +694,6 @@ async def process_vendor(
                             user_id, item_id, quota.plan, quota.limit, api_token
                         )
                     return
-
-            # Interim status so the person who clicked the automation gets
-            # immediate feedback — the OpenSanctions call below (with retries)
-            # can otherwise leave the board looking unchanged for a while.
-            await _mark_pending(board_id, item_id, status_column_id, details_column_id, api_token)
 
             vendor_name = await get_item_name(item_id, api_token)
             if not vendor_name:

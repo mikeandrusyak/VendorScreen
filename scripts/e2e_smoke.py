@@ -103,6 +103,14 @@ MONDAY_API = "https://api.monday.com/v2"
 VALID_LEVELS = {"Clear", "Warning", "Critical"}
 POLL_TIMEOUT_S = 180
 POLL_INTERVAL_S = 3
+# Upper bound on how long a single screening may take end-to-end (POST → status
+# on the board). Screening runs inline within the action request now, so on a
+# warm instance this is ~3s; the ceiling is deliberately generous to absorb a
+# cold container/DB start without flaking. Its real job is to catch a throttling
+# regression: if the inline screening is ever turned back into a detached
+# background task, monday Code (Cloud Run) starves it of CPU and this balloons to
+# ~90s — well past the ceiling — failing the smoke test instead of shipping slow.
+LATENCY_CEILING_S = int(os.environ.get("E2E_LATENCY_CEILING_S", "45"))
 
 
 def gql(query, variables):
@@ -229,15 +237,19 @@ def stage_screening(item_id, action_jwt):
     if COUNTRY_COL:
         fields["countryColumnId"] = {"columnId": COUNTRY_COL}
 
+    # Screening runs inline within this request (not a detached background task —
+    # see execute_action), so the POST blocks until the status is written and can
+    # legitimately take a few seconds, more on a cold start; give it room.
+    started = time.time()
     resp = httpx.post(
         f"{APP_URL}/monday/execute_action",
         json={"payload": {"inboundFieldValues": fields}},
         headers={"Authorization": f"Bearer {action_jwt}"},
-        timeout=20.0,
+        timeout=float(POLL_TIMEOUT_S),
     )
     if resp.status_code != 200:
         raise SystemExit(f"action endpoint returned {resp.status_code}: {resp.text}")
-    print("[e2e] action accepted; waiting for async screening to write back...")
+    print("[e2e] action accepted; reading screening result...")
 
     deadline = time.time() + POLL_TIMEOUT_S
     status = None
@@ -250,6 +262,18 @@ def stage_screening(item_id, action_jwt):
     if status not in VALID_LEVELS:
         raise SystemExit(
             f"expected a risk level {sorted(VALID_LEVELS)} within {POLL_TIMEOUT_S}s, got {status!r}"
+        )
+
+    # Speed guard: screening is inline, so this is the real end-to-end latency.
+    # A regression to background dispatch would blow past the ceiling (~90s under
+    # Cloud Run CPU throttling) and fail here rather than silently shipping slow.
+    elapsed = time.time() - started
+    print(f"[e2e] screening landed in {elapsed:.1f}s (ceiling {LATENCY_CEILING_S}s)")
+    if elapsed > LATENCY_CEILING_S:
+        raise SystemExit(
+            f"screening took {elapsed:.1f}s, over the {LATENCY_CEILING_S}s ceiling — "
+            "likely a background-dispatch regression starving CPU on Cloud Run "
+            "(screening must run inline within the action request)"
         )
     if status != EXPECT_LEVEL:
         raise SystemExit(

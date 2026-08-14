@@ -378,10 +378,11 @@ async def test_unexpected_error_marks_board_failed(monkeypatch):
     assert calls["update"]["risk_level"] == "Screening Failed"
 
 
-async def test_pending_status_written_before_screening(monkeypatch):
-    # The board should get an immediate 'Screening…' status before the
-    # (potentially slow) OpenSanctions call, so a board button click doesn't
-    # look like nothing happened.
+async def test_screening_writes_single_final_status(monkeypatch):
+    # Screening runs inline within the request (monday Code / Cloud Run throttles
+    # CPU on a detached background task), so it's fast enough that there's no
+    # interim 'Screening…' write — the board goes straight to the final status in
+    # exactly one write. Guards against reintroducing the extra pending round-trip.
     monkeypatch.setattr(main.db, "is_configured", lambda: False)
 
     updates = []
@@ -390,9 +391,8 @@ async def test_pending_status_written_before_screening(monkeypatch):
         return "Acme"
 
     async def fake_check(vendor_name, country=None):
-        # The pending write must have already landed by the time the
-        # (slow) screening call runs.
-        assert updates and updates[0]["risk_level"] == "Screening…"
+        # No status must have been written before the real screening result.
+        assert updates == []
         return {"riskLevel": "Clear", "details": "ok"}
 
     async def fake_update(**kw):
@@ -404,7 +404,7 @@ async def test_pending_status_written_before_screening(monkeypatch):
 
     await main.process_vendor("b", "i", "s", "d", "tok")
 
-    assert [u["risk_level"] for u in updates] == ["Screening…", "Clear"]
+    assert [u["risk_level"] for u in updates] == ["Clear"]
 
 
 async def test_no_account_id_skips_quota_entirely(monkeypatch):
