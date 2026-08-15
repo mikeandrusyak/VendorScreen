@@ -246,16 +246,40 @@ async def execute_action(request: Request):
     # allocated the whole time. It fits the timing budget comfortably: the work is
     # ~2-3s, monday's synchronous action window is ~60s, and Cloud Run's request
     # timeout is 300s.
-    await process_vendor(
-        board_id,
-        item_id,
-        status_column_id,
-        details_column_id,
-        api_token,
-        account_id=account_id,
-        country_column_id=country_column_id,
-        user_id=user_id,
+    result = (
+        await process_vendor(
+            board_id,
+            item_id,
+            status_column_id,
+            details_column_id,
+            api_token,
+            account_id=account_id,
+            country_column_id=country_column_id,
+            user_id=user_id,
+        )
+        or {}
     )
+
+    # outputFields lets the Sidekick tool confirm what happened; a plain
+    # trigger-wired automation ignores this and it's a no-op for it.
+    message = result.get("message")
+    if not message:
+        vendor_name = result.get("vendor_name")
+        risk_level = result.get("risk_level")
+        if vendor_name and risk_level:
+            message = (
+                f'Screened "{vendor_name}": {risk_level}. '
+                f"View item: https://view.monday.com/{item_id}"
+            )
+        else:
+            message = "This item was not screened."
+
+    return {
+        "outputFields": {
+            "resultMessage": message,
+            "riskLevel": result.get("risk_level") or "",
+        }
+    }
 
     return {}
 
@@ -693,12 +717,23 @@ async def process_vendor(
                         await _alert_quota_reached(
                             user_id, item_id, quota.plan, quota.limit, api_token
                         )
-                    return
+                    return {
+                        "vendor_name": None,
+                        "risk_level": RISK_LEVEL["LIMIT"],
+                        "message": (
+                            f"Monthly screening limit reached for the {quota.plan} plan "
+                            f"({quota.limit}/month). This item was not screened."
+                        ),
+                    }
 
             vendor_name = await get_item_name(item_id, api_token)
             if not vendor_name:
                 log.error("[vendor] Could not resolve name for item %s — skipping", item_id)
-                return
+                return {
+                    "vendor_name": None,
+                    "risk_level": None,
+                    "message": "Could not find this item on the board — nothing was screened.",
+                }
 
             # Optional country refinement. A failure here must not abort the
             # screening — fall back to name-only rather than losing the check.
@@ -738,6 +773,7 @@ async def process_vendor(
             log.info("[vendor] Monday.com updated for item %s", item_id)
             await _record_audit(account_id, board_id, item_id, vendor_name, result, country=country)
             await _alert_critical(user_id, item_id, vendor_name, result, api_token)
+            return {"vendor_name": vendor_name, "risk_level": result["riskLevel"], "message": None}
         except SanctionsUnavailableError as err:
             # OpenSanctions itself is down/rate-limited after retries. Mark the
             # board so the client sees the check needs a re-run instead of a
@@ -753,6 +789,14 @@ async def process_vendor(
                 account_id,
                 vendor_name,
             )
+            return {
+                "vendor_name": vendor_name,
+                "risk_level": None,
+                "message": (
+                    "The sanctions screening service was unavailable — "
+                    "this item is flagged for a re-run."
+                ),
+            }
         except Exception as err:
             # Anything else unexpected (a non-retryable OpenSanctions error, a
             # monday GraphQL failure resolving the item, a bug) — same fail-safe
@@ -768,6 +812,13 @@ async def process_vendor(
                 account_id,
                 vendor_name,
             )
+            return {
+                "vendor_name": vendor_name,
+                "risk_level": None,
+                "message": (
+                    "Something went wrong while screening this item — it's flagged for a re-run."
+                ),
+            }
 
 
 if __name__ == "__main__":

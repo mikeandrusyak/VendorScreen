@@ -74,7 +74,7 @@ def test_missing_fields_is_bad_request(monkeypatch):
     assert resp.status_code == 400
 
 
-def test_valid_payload_enqueues_and_returns_empty(monkeypatch):
+def test_valid_payload_enqueues_and_returns_output_fields(monkeypatch):
     monkeypatch.setattr(main, "NODE_ENV", "development")
     monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
 
@@ -100,7 +100,11 @@ def test_valid_payload_enqueues_and_returns_empty(monkeypatch):
     resp = client.post(ACTION_URL, json={"payload": {"inboundFieldValues": _valid_fields()}})
 
     assert resp.status_code == 200
-    assert resp.json() == {}
+    # process_vendor's fake here returns nothing (like a mock with no result);
+    # execute_action must tolerate that and still shape a valid outputFields body.
+    assert resp.json() == {
+        "outputFields": {"resultMessage": "This item was not screened.", "riskLevel": ""}
+    }
     assert seen["args"] == ("123", "456", "status", "details", "dev-token")
     # Dev-mode fallback has no signed JWT, so there's no tenant to meter.
     assert seen["account_id"] is None
