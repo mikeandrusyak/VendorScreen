@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VendorScreen — Automatic sanctions &amp; PEP screening for monday.com</title>
+  <meta name="description" content="VendorScreen automatically screens every new vendor on your monday.com board against global sanctions and PEP lists, writes the risk back to your columns, alerts you on Critical, and keeps an exportable audit trail." />
+  <link rel="icon" type="image/png" href="assets/icon.png" />
+  <link rel="stylesheet" href="style.css" />
+  <meta property="og:title" content="VendorScreen — Automatic sanctions &amp; PEP screening" />
+  <meta property="og:description" content="Screen every new vendor against sanctions &amp; PEP lists, right inside monday.com." />
+  <meta property="og:image" content="assets/shot-statuses.png" />
+  <meta property="og:type" content="website" />
+</head>
+<body>
+
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="index.html">
+        <img src="assets/icon.png" alt="VendorScreen logo" />
+        <span>VendorScreen</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#demo">Demo</a>
+        <a href="#how">How it works</a>
+        <a href="#plans">Plans</a>
+        <a class="nav-cta" href="#get">Get it</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero -->
+    <section class="hero">
+      <div class="wrap">
+        <span class="eyebrow">monday.com marketplace app</span>
+        <h1>Screen every new vendor for sanctions &amp; PEP risk</h1>
+        <p class="lede">
+          VendorScreen checks each vendor you add to a monday.com board against global
+          sanctions and PEP lists — automatically — and writes the result straight back
+          to the columns you already use. No manual lookups, no switching tools.
+        </p>
+        <div class="btns">
+          <a class="btn btn-primary" href="#get">Add to your board</a>
+          <a class="btn btn-ghost" href="#demo">Watch 40s demo</a>
+        </div>
+        <div class="hero-shot">
+          <img src="assets/shot-statuses.png" alt="A monday.com board showing vendors automatically screened as Clear, Warning, and Critical" />
+        </div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features" class="alt">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Compliance screening, on autopilot</h2>
+          <p>Set it up once and every new vendor is screened the moment it lands on your board.</p>
+        </div>
+        <div class="grid">
+          <div class="card">
+            <div class="ic">⚡</div>
+            <h3>Automatic on every item</h3>
+            <p>Triggered when a vendor item is created — or on demand from a button. Results appear in seconds.</p>
+          </div>
+          <div class="card">
+            <div class="ic">🛡️</div>
+            <h3>Sanctions &amp; PEP coverage</h3>
+            <p>Powered by OpenSanctions global data — sanctions lists and politically exposed persons in one check.</p>
+          </div>
+          <div class="card">
+            <div class="ic">🔎</div>
+            <h3>See exactly why</h3>
+            <p>Every result carries the matched entity's name, the match score, and a link to the source profile.</p>
+          </div>
+          <div class="card">
+            <div class="ic">🔔</div>
+            <h3>Instant Critical alerts</h3>
+            <p>When a vendor screens as Critical, the automation owner is notified right away — nothing slips through.</p>
+          </div>
+          <div class="card">
+            <div class="ic">📊</div>
+            <h3>Exportable audit trail</h3>
+            <p>Every screening is recorded. Filter by board and download a CSV anytime for your compliance records.</p>
+          </div>
+          <div class="card">
+            <div class="ic">🔒</div>
+            <h3>Private &amp; multi-tenant</h3>
+            <p>Data is segregated per account, encrypted in transit and at rest, and fully deleted on uninstall.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Status legend -->
+    <section id="statuses">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Three clear outcomes</h2>
+          <p>VendorScreen scores each match and writes one of three risk levels back to your status column.</p>
+        </div>
+        <div class="statuses">
+          <div class="status">
+            <span class="pill clear">Clear</span>
+            <p>No sanction or PEP match was surfaced for the vendor at the time of the query.</p>
+          </div>
+          <div class="status">
+            <span class="pill warn">Warning</span>
+            <p>A possible PEP or sanction-related flag worth a human review before you proceed.</p>
+          </div>
+          <div class="status">
+            <span class="pill crit">Critical</span>
+            <p>A likely direct sanction match — flagged for immediate attention, with an instant alert.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Demo + gallery -->
+    <section id="demo" class="alt">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>See it in action</h2>
+          <p>Add a vendor, and the status and details fill in on their own.</p>
+        </div>
+        <div class="demo-frame">
+          <video controls muted playsinline preload="metadata" poster="assets/shot-statuses.png">
+            <source src="assets/demo.mp4" type="video/mp4" />
+            Your browser doesn't support embedded video —
+            <a href="assets/demo.mp4">download the demo</a> instead.
+          </video>
+        </div>
+        <div class="gallery">
+          <figure>
+            <img src="assets/shot-details.png" alt="Close-up of the screening details column showing the match name, score and source link" />
+            <figcaption>See exactly why — match name, score and source link.</figcaption>
+          </figure>
+          <figure>
+            <img src="assets/shot-setup.png" alt="Setting up the automation recipe in monday.com" />
+            <figcaption>Set up once — screens every new vendor automatically.</figcaption>
+          </figure>
+          <figure>
+            <img src="assets/shot-audit.png" alt="The Screening Audit board view with an Export CSV button" />
+            <figcaption>Full audit trail, exportable anytime.</figcaption>
+          </figure>
+          <figure>
+            <img src="assets/shot-alert.png" alt="A monday.com notification alerting that a vendor was flagged Critical" />
+            <figcaption>Instant alert when a vendor is flagged Critical.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section id="how">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>How it works</h2>
+          <p>Three steps, then it runs itself.</p>
+        </div>
+        <div class="steps">
+          <div class="step">
+            <div class="num">1</div>
+            <h3>Add the recipe</h3>
+            <p>In monday's automation builder, pick “When an item is created, screen the vendor.”</p>
+          </div>
+          <div class="step">
+            <div class="num">2</div>
+            <h3>Map your columns</h3>
+            <p>Choose the status and details columns to write to — and optionally a country column to sharpen matches.</p>
+          </div>
+          <div class="step">
+            <div class="num">3</div>
+            <h3>Let it screen</h3>
+            <p>Every new vendor is checked automatically, flagged, alerted on if Critical, and logged for audit.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Plans -->
+    <section id="plans" class="alt">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Simple monthly plans</h2>
+          <p>Start free. Upgrade anytime through monday.com's built-in billing.</p>
+        </div>
+        <div class="plans">
+          <div class="plan">
+            <div class="name">Free</div>
+            <div class="quota">20<span> / mo</span></div>
+            <p class="note">Screenings per month, to get started.</p>
+          </div>
+          <div class="plan featured">
+            <div class="name">Pro</div>
+            <div class="quota">400<span> / mo</span></div>
+            <p class="note">For growing vendor pipelines.</p>
+          </div>
+          <div class="plan">
+            <div class="name">Business</div>
+            <div class="quota">1,500<span> / mo</span></div>
+            <p class="note">For high-volume onboarding.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section id="get" class="cta-band">
+      <div class="wrap">
+        <div class="cta-inner">
+          <h2>Bring compliance screening to your board</h2>
+          <p>Install VendorScreen from the monday.com marketplace and screen your next vendor in minutes.</p>
+          <div class="btns">
+            <a class="btn btn-primary" href="https://monday.com/marketplace" rel="noopener">Get it on monday.com</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-cols">
+        <a class="brand" href="index.html">
+          <img src="assets/icon.png" alt="" width="26" height="26" style="border-radius:7px" />
+          <span>VendorScreen</span>
+        </a>
+        <div class="footer-links">
+          <a href="#features">Features</a>
+          <a href="#demo">Demo</a>
+          <a href="privacy.html">Privacy Policy</a>
+          <a href="terms.html">Terms of Service</a>
+          <a href="mailto:andrusyakmd@gmail.com">Support</a>
+        </div>
+      </div>
+      <p class="disclaimer">
+        VendorScreen provides informational screening to support your due-diligence process; it does
+        not make compliance decisions. A “Clear” result does not guarantee a vendor is risk-free —
+        results are derived from third-party data that may be incomplete or time-lagged, and must be
+        independently verified. © 2026 Andrusiak Mykhailo. Not affiliated with or endorsed by monday.com.
+      </p>
+    </div>
+  </footer>
+
+</body>
+</html>
