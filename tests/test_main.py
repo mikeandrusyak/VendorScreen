@@ -8,6 +8,7 @@ from main import app, field_value
 client = TestClient(app)
 
 ACTION_URL = "/monday/execute_action"
+SCREEN_BY_NAME_URL = "/monday/screen_by_name"
 SUBSCRIPTION_URL = "/monday/subscription_webhook"
 
 
@@ -74,34 +75,6 @@ def test_missing_fields_is_bad_request(monkeypatch):
     assert resp.status_code == 400
 
 
-def test_conversational_vendor_name_returns_output_fields(monkeypatch):
-    # A vendorName with no itemId is a Sidekick (conversational) invocation: screen
-    # the name and return the result in outputFields — no board item, no columns,
-    # and it must NOT hit the missing-fields 400 the board flow uses.
-    monkeypatch.setattr(main, "NODE_ENV", "development")
-    monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
-
-    async def fake_check(vendor_name, country=None):
-        assert vendor_name == "Rosneft"
-        return {"riskLevel": "Critical", "details": "sanction match"}
-
-    async def no_write(**kw):
-        raise AssertionError("conversational screening must not write to a board")
-
-    monkeypatch.setattr(main, "check_vendor_with_retry", fake_check)
-    monkeypatch.setattr(main, "update_vendor_record", no_write)
-
-    resp = client.post(
-        ACTION_URL,
-        json={"payload": {"inboundFieldValues": {"vendorName": "Rosneft"}}},
-    )
-
-    assert resp.status_code == 200
-    out = resp.json()["outputFields"]
-    assert out["riskLevel"] == "Critical"
-    assert "Rosneft" in out["resultMessage"]
-
-
 def test_valid_payload_enqueues_and_returns_output_fields(monkeypatch):
     monkeypatch.setattr(main, "NODE_ENV", "development")
     monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
@@ -136,6 +109,61 @@ def test_valid_payload_enqueues_and_returns_output_fields(monkeypatch):
     assert seen["args"] == ("123", "456", "status", "details", "dev-token")
     # Dev-mode fallback has no signed JWT, so there's no tenant to meter.
     assert seen["account_id"] is None
+
+
+# --- screen_by_name (conversational / Sidekick endpoint) -------------------
+
+
+def test_screen_by_name_challenge_is_echoed():
+    resp = client.post(SCREEN_BY_NAME_URL, json={"challenge": "xyz"})
+    assert resp.status_code == 200
+    assert resp.json() == {"challenge": "xyz"}
+
+
+def test_screen_by_name_invalid_jwt_is_unauthorized():
+    resp = client.post(
+        SCREEN_BY_NAME_URL,
+        json={"payload": {"inboundFieldValues": {"vendorName": "Rosneft"}}},
+        headers={"Authorization": "Bearer not-a-real-token"},
+    )
+    assert resp.status_code == 401
+
+
+def test_screen_by_name_missing_vendor_name_is_bad_request(monkeypatch):
+    monkeypatch.setattr(main, "NODE_ENV", "development")
+    monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
+
+    resp = client.post(SCREEN_BY_NAME_URL, json={"payload": {"inboundFieldValues": {}}})
+
+    assert resp.status_code == 400
+
+
+def test_screen_by_name_returns_output_fields(monkeypatch):
+    # A vendorName screens the name and returns the result in outputFields — no
+    # board item, no columns, and it must NOT write to a board.
+    monkeypatch.setattr(main, "NODE_ENV", "development")
+    monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
+    monkeypatch.setattr(main.db, "is_configured", lambda: False)
+
+    async def fake_check(vendor_name, country=None):
+        assert vendor_name == "Rosneft"
+        return {"riskLevel": "Critical", "details": "sanction match"}
+
+    async def no_write(**kw):
+        raise AssertionError("conversational screening must not write to a board")
+
+    monkeypatch.setattr(main, "check_vendor_with_retry", fake_check)
+    monkeypatch.setattr(main, "update_vendor_record", no_write)
+
+    resp = client.post(
+        SCREEN_BY_NAME_URL,
+        json={"payload": {"inboundFieldValues": {"vendorName": "Rosneft"}}},
+    )
+
+    assert resp.status_code == 200
+    out = resp.json()["outputFields"]
+    assert out["riskLevel"] == "Critical"
+    assert "Rosneft" in out["resultMessage"]
 
 
 def test_missing_board_id_resolves_from_item(monkeypatch):

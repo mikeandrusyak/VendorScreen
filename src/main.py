@@ -226,17 +226,6 @@ async def execute_action(request: Request):
     # Absent in dev (no signed token); alerting is then skipped.
     user_id = auth.get("userId")
 
-    # Conversational (Sidekick) invocation: a vendor name is supplied directly in
-    # the request — a natural-language call via monday's Sidekick tool — instead of
-    # a board item. Screen that name and hand the result straight back in the
-    # response; no board/item/column mapping, nothing written to a board. This
-    # branch is what makes "Screen Rosneft for sanctions" work with no fields to
-    # fill. Distinguished from the board flow by carrying a vendorName and no item.
-    vendor_name_input = field_value(fields.get("vendorName"), "vendorName", "value", "text")
-    if vendor_name_input and not item_id:
-        country_input = field_value(fields.get("country"), "country", "value", "text")
-        return await screen_vendor_name(vendor_name_input, country_input, account_id)
-
     if not board_id or not item_id or not status_column_id or not details_column_id:
         return JSONResponse(
             status_code=400,
@@ -271,8 +260,8 @@ async def execute_action(request: Request):
         or {}
     )
 
-    # outputFields lets the Sidekick tool confirm what happened; a plain
-    # trigger-wired automation ignores this and it's a no-op for it.
+    # outputFields lets a downstream automation block read what happened; a plain
+    # trigger-wired automation that maps nothing ignores this and it's a no-op.
     message = result.get("message")
     if not message:
         vendor_name = result.get("vendor_name")
@@ -291,6 +280,42 @@ async def execute_action(request: Request):
             "riskLevel": result.get("risk_level") or "",
         }
     }
+
+
+# Second Automation Block, dedicated to the conversational (Sidekick) use case:
+# screen a vendor NAME supplied directly in the chat, with no board item and no
+# column mapping. Kept as its own block/endpoint rather than a branch inside
+# execute_action so each block has one coherent contract — this one takes just a
+# name, never writes to a board, and never 400s on missing columns. The Sidekick
+# skill wraps THIS block; the Automation Template wraps execute_action.
+@app.post("/monday/screen_by_name")
+async def screen_by_name_action(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    # Monday URL verification challenge (sent when the action URL is registered)
+    if body.get("challenge"):
+        return {"challenge": body["challenge"]}
+
+    auth = extract_auth(request)
+    if not auth:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+    payload = body.get("payload") or {}
+    fields = payload.get("inboundFieldValues") or payload.get("inputFields") or {}
+
+    vendor_name = field_value(fields.get("vendorName"), "vendorName", "value", "text")
+    if not vendor_name:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Missing required input field (vendorName)"},
+        )
+    country = field_value(fields.get("country"), "country", "value", "text")
+    account_id = auth.get("accountId")
+
+    return await screen_vendor_name(vendor_name, country, account_id)
 
 
 async def screen_vendor_name(vendor_name, country, account_id):
