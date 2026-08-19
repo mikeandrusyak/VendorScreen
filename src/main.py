@@ -226,6 +226,17 @@ async def execute_action(request: Request):
     # Absent in dev (no signed token); alerting is then skipped.
     user_id = auth.get("userId")
 
+    # Conversational (Sidekick) invocation: a vendor name is supplied directly in
+    # the request — a natural-language call via monday's Sidekick tool — instead of
+    # a board item. Screen that name and hand the result straight back in the
+    # response; no board/item/column mapping, nothing written to a board. This
+    # branch is what makes "Screen Rosneft for sanctions" work with no fields to
+    # fill. Distinguished from the board flow by carrying a vendorName and no item.
+    vendor_name_input = field_value(fields.get("vendorName"), "vendorName", "value", "text")
+    if vendor_name_input and not item_id:
+        country_input = field_value(fields.get("country"), "country", "value", "text")
+        return await screen_vendor_name(vendor_name_input, country_input, account_id)
+
     if not board_id or not item_id or not status_column_id or not details_column_id:
         return JSONResponse(
             status_code=400,
@@ -281,7 +292,45 @@ async def execute_action(request: Request):
         }
     }
 
-    return {}
+
+async def screen_vendor_name(vendor_name, country, account_id):
+    """Screen a vendor name supplied directly in the request (a conversational
+    Sidekick-tool invocation) and return the result in the response's outputFields.
+
+    Unlike the board flow, there is no item, no column mapping, and nothing is
+    written to a board — the result goes straight back to the chat. Reuses the same
+    OpenSanctions call, monthly quota (a conversational screen still counts), and
+    audit log as the board flow (audit rows carry null board/item ids here). Never
+    raises: any screening error yields the fail-safe 'unavailable' result so
+    Sidekick always gets a usable answer."""
+    if account_id and db.is_configured():
+        try:
+            quota = await repository.check_quota(account_id)
+        except Exception as quota_err:
+            log.error("[sidekick] quota check failed for %s: %s — allowing", account_id, quota_err)
+            sentry_sdk.capture_exception(quota_err)
+            quota = None
+        if quota is not None and not quota.allowed:
+            msg = with_disclaimer(
+                f"Monthly screening limit reached for the {quota.plan} plan "
+                f"({quota.limit}/month). Upgrade your plan or wait until the next period."
+            )
+            return {"outputFields": {"resultMessage": msg, "riskLevel": RISK_LEVEL["LIMIT"]}}
+
+    try:
+        result = await check_vendor_with_retry(vendor_name, country)
+    except Exception as err:
+        # Covers SanctionsUnavailableError and anything unexpected — never leave
+        # the Sidekick conversation without an answer.
+        log.error("[sidekick] Failed to screen %r: %s", vendor_name, err)
+        sentry_sdk.capture_exception(err)
+        result = unavailable_result()
+    else:
+        await _record_audit(account_id, None, None, vendor_name, result, country=country)
+
+    log.info('[sidekick] Screened "%s": %s', vendor_name, result["riskLevel"])
+    message = f'Screened "{vendor_name}": {result["riskLevel"]}. {result["details"]}'
+    return {"outputFields": {"resultMessage": message, "riskLevel": result["riskLevel"]}}
 
 
 # monday.com Monetization webhook — fired when a customer subscribes, changes,

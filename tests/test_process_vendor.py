@@ -423,3 +423,61 @@ async def test_no_account_id_skips_quota_entirely(monkeypatch):
 
     assert consulted["quota"] is False
     assert calls["check"] == "Acme"
+
+
+# --- screen_vendor_name (conversational / Sidekick) ------------------------
+
+
+async def test_screen_vendor_name_returns_result_without_board(monkeypatch):
+    # Conversational screening returns the result in outputFields and never writes
+    # to a board (no item/columns involved).
+    monkeypatch.setattr(main.db, "is_configured", lambda: False)
+
+    async def fake_check(vendor_name, country=None):
+        assert vendor_name == "Acme"
+        return {"riskLevel": "Warning", "details": "possible pep flag"}
+
+    async def no_write(**kw):
+        raise AssertionError("conversational screening must not write to a board")
+
+    monkeypatch.setattr(main, "check_vendor_with_retry", fake_check)
+    monkeypatch.setattr(main, "update_vendor_record", no_write)
+
+    out = await main.screen_vendor_name("Acme", None, account_id=None)
+
+    assert out["outputFields"]["riskLevel"] == "Warning"
+    assert "Acme" in out["outputFields"]["resultMessage"]
+
+
+async def test_screen_vendor_name_over_quota_is_limit_reached(monkeypatch):
+    # An account over its monthly allowance gets a 'Limit Reached' answer and no
+    # OpenSanctions call is made.
+    monkeypatch.setattr(main.db, "is_configured", lambda: True)
+
+    async def fake_quota(account_id):
+        return QuotaResult(allowed=False, used=20, limit=20, plan="free")
+
+    async def fake_check(vendor_name, country=None):
+        raise AssertionError("must not screen when over quota")
+
+    monkeypatch.setattr(main.repository, "check_quota", fake_quota)
+    monkeypatch.setattr(main, "check_vendor_with_retry", fake_check)
+
+    out = await main.screen_vendor_name("Acme", None, account_id="123")
+
+    assert out["outputFields"]["riskLevel"] == "Limit Reached"
+    assert "limit" in out["outputFields"]["resultMessage"].lower()
+
+
+async def test_screen_vendor_name_failure_is_unavailable(monkeypatch):
+    # A screening failure never raises to Sidekick — it returns the fail-safe result.
+    monkeypatch.setattr(main.db, "is_configured", lambda: False)
+
+    async def boom(vendor_name, country=None):
+        raise SanctionsUnavailableError("down")
+
+    monkeypatch.setattr(main, "check_vendor_with_retry", boom)
+
+    out = await main.screen_vendor_name("Acme", None, account_id=None)
+
+    assert out["outputFields"]["riskLevel"] == "Screening Failed"

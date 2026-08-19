@@ -74,6 +74,34 @@ def test_missing_fields_is_bad_request(monkeypatch):
     assert resp.status_code == 400
 
 
+def test_conversational_vendor_name_returns_output_fields(monkeypatch):
+    # A vendorName with no itemId is a Sidekick (conversational) invocation: screen
+    # the name and return the result in outputFields — no board item, no columns,
+    # and it must NOT hit the missing-fields 400 the board flow uses.
+    monkeypatch.setattr(main, "NODE_ENV", "development")
+    monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
+
+    async def fake_check(vendor_name, country=None):
+        assert vendor_name == "Rosneft"
+        return {"riskLevel": "Critical", "details": "sanction match"}
+
+    async def no_write(**kw):
+        raise AssertionError("conversational screening must not write to a board")
+
+    monkeypatch.setattr(main, "check_vendor_with_retry", fake_check)
+    monkeypatch.setattr(main, "update_vendor_record", no_write)
+
+    resp = client.post(
+        ACTION_URL,
+        json={"payload": {"inboundFieldValues": {"vendorName": "Rosneft"}}},
+    )
+
+    assert resp.status_code == 200
+    out = resp.json()["outputFields"]
+    assert out["riskLevel"] == "Critical"
+    assert "Rosneft" in out["resultMessage"]
+
+
 def test_valid_payload_enqueues_and_returns_output_fields(monkeypatch):
     monkeypatch.setattr(main, "NODE_ENV", "development")
     monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
