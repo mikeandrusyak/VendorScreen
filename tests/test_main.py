@@ -561,7 +561,7 @@ def test_download_streams_csv_for_valid_token(monkeypatch):
 
     import datetime as dt
 
-    async def fake_list_events(account_id, board_id=None, limit=10_000):
+    async def fake_list_events(account_id, board_id=None, include_chat=False, limit=10_000):
         assert account_id == 777
         return [
             {
@@ -636,9 +636,10 @@ def test_board_view_json_returns_board_scoped_rows(monkeypatch):
 
     import datetime as dt
 
-    async def fake_list_events(account_id, board_id=None, limit=10_000):
+    async def fake_list_events(account_id, board_id=None, include_chat=False, limit=10_000):
         assert account_id == 777
         assert board_id == "123"
+        assert include_chat is False
         return [
             {
                 "created_at": dt.datetime(2026, 7, 11, 9, 0, tzinfo=dt.UTC),
@@ -673,7 +674,7 @@ def test_board_view_json_returns_board_scoped_rows(monkeypatch):
 def test_board_view_csv_streams_board_scoped(monkeypatch):
     monkeypatch.setenv("MONDAY_CLIENT_SECRET", "client-secret")
 
-    async def fake_list_events(account_id, board_id=None, limit=10_000):
+    async def fake_list_events(account_id, board_id=None, include_chat=False, limit=10_000):
         assert board_id == "123"
         return []
 
@@ -687,6 +688,42 @@ def test_board_view_csv_streams_board_scoped(monkeypatch):
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/csv")
     assert "board-123" in resp.headers["content-disposition"]
+
+
+def test_board_view_json_include_ai_passes_through(monkeypatch):
+    monkeypatch.setenv("MONDAY_CLIENT_SECRET", "client-secret")
+
+    async def fake_list_events(account_id, board_id=None, include_chat=False, limit=10_000):
+        assert board_id == "123"
+        assert include_chat is True
+        return []
+
+    monkeypatch.setattr(repository, "list_events", fake_list_events)
+
+    resp = client.get(
+        VIEW_JSON_URL,
+        params={"boardId": "123", "includeAi": "1"},
+        headers={"Authorization": f"Bearer {_session_jwt()}"},
+    )
+    assert resp.status_code == 200
+
+
+def test_board_view_csv_include_ai_changes_filename(monkeypatch):
+    monkeypatch.setenv("MONDAY_CLIENT_SECRET", "client-secret")
+
+    async def fake_list_events(account_id, board_id=None, include_chat=False, limit=10_000):
+        assert include_chat is True
+        return []
+
+    monkeypatch.setattr(repository, "list_events", fake_list_events)
+
+    resp = client.get(
+        VIEW_CSV_URL,
+        params={"boardId": "123", "includeAi": "1"},
+        headers={"Authorization": f"Bearer {_session_jwt()}"},
+    )
+    assert resp.status_code == 200
+    assert "board-123-with-ai" in resp.headers["content-disposition"]
 
 
 def test_board_view_csv_rejects_bad_token(monkeypatch):

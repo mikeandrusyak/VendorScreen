@@ -128,6 +128,49 @@ async def test_record_and_list_events_roundtrip(monkeypatch):
         await db.close_db()
 
 
+async def test_list_events_include_chat_merges_board_and_chat_rows(monkeypatch):
+    # A board-scoped query normally excludes conversational (board_id NULL)
+    # screenings; include_chat=True should pull those in too, but still leave
+    # out rows that belong to a *different* board.
+    monkeypatch.setenv("DATABASE_URL", TEST_DB_URL)
+    await db.init_db()
+
+    account_id = 900_000_000 + (uuid.uuid4().int % 1_000_000)
+    pool = db.get_pool()
+    try:
+        await repository.record_event(
+            account_id=account_id,
+            board_id=123,
+            item_id=1,
+            vendor_name="Board Vendor",
+            risk_level="Clear",
+        )
+        await repository.record_event(
+            account_id=account_id,
+            board_id=None,
+            item_id=None,
+            vendor_name="Chat Vendor",
+            risk_level="Warning",
+        )
+        await repository.record_event(
+            account_id=account_id,
+            board_id=999,
+            item_id=2,
+            vendor_name="Other Board Vendor",
+            risk_level="Critical",
+        )
+
+        board_only = await repository.list_events(account_id, board_id=123)
+        assert {e["vendor_name"] for e in board_only} == {"Board Vendor"}
+
+        with_chat = await repository.list_events(account_id, board_id=123, include_chat=True)
+        assert {e["vendor_name"] for e in with_chat} == {"Board Vendor", "Chat Vendor"}
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM screening_events WHERE account_id = $1", account_id)
+        await db.close_db()
+
+
 async def test_purge_account_deletes_all_tenant_rows(monkeypatch):
     # Proves the uninstall purge removes an account's audit rows, usage counter,
     # and account record — and leaves a different account untouched.

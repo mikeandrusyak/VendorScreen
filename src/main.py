@@ -606,27 +606,28 @@ async def board_view():
 
 
 @app.get("/view/audit.json")
-async def board_view_audit_json(request: Request, boardId: str = ""):
+async def board_view_audit_json(request: Request, boardId: str = "", includeAi: bool = False):
     account_id, _ = _board_view_auth(request)
     if account_id is None:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
     if not boardId:
         return JSONResponse(status_code=400, content={"error": "boardId is required"})
 
-    events = await repository.list_events(account_id, board_id=boardId)
+    events = await repository.list_events(account_id, board_id=boardId, include_chat=includeAi)
     return {"rows": [_audit_row(e) for e in events]}
 
 
 @app.get("/view/audit.csv")
-async def board_view_audit_csv(request: Request, boardId: str = ""):
+async def board_view_audit_csv(request: Request, boardId: str = "", includeAi: bool = False):
     account_id, _ = _board_view_auth(request)
     if account_id is None:
         return PlainTextResponse("Unauthorized", status_code=401)
     if not boardId:
         return PlainTextResponse("boardId is required", status_code=400)
 
-    events = await repository.list_events(account_id, board_id=boardId)
-    return _audit_csv_response(events, f"vendorscreen-audit-board-{boardId}.csv")
+    events = await repository.list_events(account_id, board_id=boardId, include_chat=includeAi)
+    suffix = "-with-ai" if includeAi else ""
+    return _audit_csv_response(events, f"vendorscreen-audit-board-{boardId}{suffix}.csv")
 
 
 async def _record_audit(account_id, board_id, item_id, vendor_name, result, country=None):
