@@ -246,18 +246,116 @@ async def execute_action(request: Request):
     # allocated the whole time. It fits the timing budget comfortably: the work is
     # ~2-3s, monday's synchronous action window is ~60s, and Cloud Run's request
     # timeout is 300s.
-    await process_vendor(
-        board_id,
-        item_id,
-        status_column_id,
-        details_column_id,
-        api_token,
-        account_id=account_id,
-        country_column_id=country_column_id,
-        user_id=user_id,
+    result = (
+        await process_vendor(
+            board_id,
+            item_id,
+            status_column_id,
+            details_column_id,
+            api_token,
+            account_id=account_id,
+            country_column_id=country_column_id,
+            user_id=user_id,
+        )
+        or {}
     )
 
-    return {}
+    # outputFields lets a downstream automation block read what happened; a plain
+    # trigger-wired automation that maps nothing ignores this and it's a no-op.
+    message = result.get("message")
+    if not message:
+        vendor_name = result.get("vendor_name")
+        risk_level = result.get("risk_level")
+        if vendor_name and risk_level:
+            message = (
+                f'Screened "{vendor_name}": {risk_level}. '
+                f"View item: https://view.monday.com/{item_id}"
+            )
+        else:
+            message = "This item was not screened."
+
+    return {
+        "outputFields": {
+            "resultMessage": message,
+            "riskLevel": result.get("risk_level") or "",
+        }
+    }
+
+
+# Second Automation Block, dedicated to the conversational (Sidekick) use case:
+# screen a vendor NAME supplied directly in the chat, with no board item and no
+# column mapping. Kept as its own block/endpoint rather than a branch inside
+# execute_action so each block has one coherent contract — this one takes just a
+# name, never writes to a board, and never 400s on missing columns. The Sidekick
+# skill wraps THIS block; the Automation Template wraps execute_action.
+@app.post("/monday/screen_by_name")
+async def screen_by_name_action(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    # Monday URL verification challenge (sent when the action URL is registered)
+    if body.get("challenge"):
+        return {"challenge": body["challenge"]}
+
+    auth = extract_auth(request)
+    if not auth:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+    payload = body.get("payload") or {}
+    fields = payload.get("inboundFieldValues") or payload.get("inputFields") or {}
+
+    vendor_name = field_value(fields.get("vendorName"), "vendorName", "value", "text")
+    if not vendor_name:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Missing required input field (vendorName)"},
+        )
+    country = field_value(fields.get("country"), "country", "value", "text")
+    account_id = auth.get("accountId")
+
+    return await screen_vendor_name(vendor_name, country, account_id)
+
+
+async def screen_vendor_name(vendor_name, country, account_id):
+    """Screen a vendor name supplied directly in the request (a conversational
+    Sidekick-tool invocation) and return the result in the response's outputFields.
+
+    Unlike the board flow, there is no item, no column mapping, and nothing is
+    written to a board — the result goes straight back to the chat. Reuses the same
+    OpenSanctions call, monthly quota (a conversational screen still counts), and
+    audit log as the board flow (audit rows carry null board/item ids here). Never
+    raises: any screening error yields the fail-safe 'unavailable' result so
+    Sidekick always gets a usable answer."""
+    if account_id and db.is_configured():
+        try:
+            quota = await repository.check_quota(account_id)
+        except Exception as quota_err:
+            log.error("[sidekick] quota check failed for %s: %s — allowing", account_id, quota_err)
+            sentry_sdk.capture_exception(quota_err)
+            quota = None
+        if quota is not None and not quota.allowed:
+            msg = with_disclaimer(
+                f"Monthly screening limit reached for the {quota.plan} plan "
+                f"({quota.limit}/month). Upgrade your plan or wait until the next period."
+            )
+            return {"outputFields": {"resultMessage": msg, "riskLevel": RISK_LEVEL["LIMIT"]}}
+
+    try:
+        result = await check_vendor_with_retry(vendor_name, country)
+    except Exception as err:
+        # Covers SanctionsUnavailableError and anything unexpected — never leave
+        # the Sidekick conversation without an answer.
+        log.error("[sidekick] Failed to screen %r: %s", vendor_name, err)
+        sentry_sdk.capture_exception(err)
+        result = unavailable_result()
+    else:
+        await _record_audit(account_id, None, None, vendor_name, result, country=country)
+
+    log.info('[sidekick] Screened "%s": %s', vendor_name, result["riskLevel"])
+    message = f'Screened "{vendor_name}": {result["riskLevel"]}. {result["details"]}'
+    return {"outputFields": {"resultMessage": message, "riskLevel": result["riskLevel"]}}
 
 
 # monday.com Monetization webhook — fired when a customer subscribes, changes,
@@ -693,12 +791,23 @@ async def process_vendor(
                         await _alert_quota_reached(
                             user_id, item_id, quota.plan, quota.limit, api_token
                         )
-                    return
+                    return {
+                        "vendor_name": None,
+                        "risk_level": RISK_LEVEL["LIMIT"],
+                        "message": (
+                            f"Monthly screening limit reached for the {quota.plan} plan "
+                            f"({quota.limit}/month). This item was not screened."
+                        ),
+                    }
 
             vendor_name = await get_item_name(item_id, api_token)
             if not vendor_name:
                 log.error("[vendor] Could not resolve name for item %s — skipping", item_id)
-                return
+                return {
+                    "vendor_name": None,
+                    "risk_level": None,
+                    "message": "Could not find this item on the board — nothing was screened.",
+                }
 
             # Optional country refinement. A failure here must not abort the
             # screening — fall back to name-only rather than losing the check.
@@ -738,6 +847,7 @@ async def process_vendor(
             log.info("[vendor] Monday.com updated for item %s", item_id)
             await _record_audit(account_id, board_id, item_id, vendor_name, result, country=country)
             await _alert_critical(user_id, item_id, vendor_name, result, api_token)
+            return {"vendor_name": vendor_name, "risk_level": result["riskLevel"], "message": None}
         except SanctionsUnavailableError as err:
             # OpenSanctions itself is down/rate-limited after retries. Mark the
             # board so the client sees the check needs a re-run instead of a
@@ -753,6 +863,14 @@ async def process_vendor(
                 account_id,
                 vendor_name,
             )
+            return {
+                "vendor_name": vendor_name,
+                "risk_level": None,
+                "message": (
+                    "The sanctions screening service was unavailable — "
+                    "this item is flagged for a re-run."
+                ),
+            }
         except Exception as err:
             # Anything else unexpected (a non-retryable OpenSanctions error, a
             # monday GraphQL failure resolving the item, a bug) — same fail-safe
@@ -768,6 +886,13 @@ async def process_vendor(
                 account_id,
                 vendor_name,
             )
+            return {
+                "vendor_name": vendor_name,
+                "risk_level": None,
+                "message": (
+                    "Something went wrong while screening this item — it's flagged for a re-run."
+                ),
+            }
 
 
 if __name__ == "__main__":

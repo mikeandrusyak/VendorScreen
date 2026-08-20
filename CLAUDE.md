@@ -23,16 +23,24 @@ Full product/architecture description: [README.md](README.md). Pricing/plan logi
 
 ## How this app is wired into monday.com
 
-VendorScreen ships two **Automation Blocks** (actions) exposed via monday's Developer Center, and two **Automation Templates** (pre-wired trigger+action combos, "managed templates") that bundle them for one-click install:
+VendorScreen ships three **Automation Blocks** (actions) exposed via monday's Developer Center, two **Automation Templates** (pre-wired trigger+action combos, "managed templates") that bundle them for one-click install, and one **Sidekick skill** (the AI/conversational feature):
 
 | Feature | Type | Action URL |
 |---|---|---|
 | Screen vendor and update columns | Automation Block | `/monday/execute_action` |
-| Vendor Screener | Automation Template | wraps the block above |
+| Screen vendor by name | Automation Block | `/monday/screen_by_name` |
+| Vendor Screener | Automation Template | wraps `execute_action` |
 | Export screening audit | Automation Block | `/monday/export_action` |
-| Export Screening Audit | Automation Template | wraps the block above |
+| Export Screening Audit | Automation Template | wraps `export_action` |
+| Screen vendor for sanctions & PEP risk | Sidekick skill | wraps `screen_by_name` |
 
-Input field **keys must match exactly** what `main.py` reads from `payload.inboundFieldValues`: `boardId`, `itemId`, `statusColumnId`, `detailsColumnId`, `countryColumnId` (optional). A mismatch here fails silently as a missing field, not a clear error — see the "known gotcha" below.
+**Two screening blocks, two coherent contracts — don't merge them.** `execute_action` (item-based) takes a board item + column mapping, writes the result back to the board, and 400s if the status/details columns are missing. `screen_by_name` (conversational) takes only a `vendorName` (+ optional `country`), writes nothing to a board, and returns the answer straight in `outputFields` for the chat. The **Sidekick skill wraps `screen_by_name`**, not `execute_action`, so a chat query like "Screen Rosneft for sanctions" never needs an item or columns. Keeping them as separate blocks/endpoints is deliberate: one block = one input contract = one validation rule.
+
+Input field **keys must match exactly** what `main.py` reads from `payload.inboundFieldValues`:
+- `execute_action`: `boardId`, `itemId`, `statusColumnId`, `detailsColumnId`, `countryColumnId` (optional).
+- `screen_by_name`: `vendorName`, `country` (optional).
+
+A mismatch here fails silently as a missing field, not a clear error — see the "known gotcha" below.
 
 **Managed templates auto-propagate.** Editing a template's trigger/config in Developer Center pushes to every customer who already installed it — there is no staging step. Treat trigger changes on a managed template as a live, blast-radius-across-all-tenants change, not a local edit.
 
