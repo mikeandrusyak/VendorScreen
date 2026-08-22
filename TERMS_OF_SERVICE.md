@@ -1,7 +1,7 @@
 # Terms of Service — VendorScreen
 
 **Effective date:** 2026-07-03
-**Last updated:** 2026-08-15
+**Last updated:** 2026-08-22
 
 These Terms of Service ("**Terms**") govern access to and use of the **VendorScreen** application ("**Application**", "**Service**") distributed through the monday.com marketplace and operated by `Andrusiak Mykhailo`, an independent individual developer ("**Provider**", "**we**", "**us**"). The Application is intended solely for use by businesses and their authorized representatives ("**Customer**", "**you**"). By installing, accessing, or using the Application, you agree to these Terms on behalf of the organization you represent. If you do not have authority to bind that organization, or you do not agree, do not use the Application.
 
@@ -9,7 +9,7 @@ These Terms of Service ("**Terms**") govern access to and use of the **VendorScr
 
 ## 1. Description of the Service
 
-The Application is an **informational screening tool**. When a screening is triggered for an item (a "vendor") on a connected monday.com board — for example when the item is created or when you run the screening action (such as by clicking a button) — the Application submits the vendor name, and optionally the vendor's country if you have mapped a country column, to the OpenSanctions data service, evaluates the response, and writes an indicative risk level (**Clear**, **Warning**, or **Critical**) together with supporting notes back to the board. The Application also maintains an exportable audit trail of past screenings and sends you a notification when a vendor screens as Critical. All subscription plans include the same features; plans differ only in the number of screenings allowed per month (see Section 4).
+The Application is an **informational screening tool**. When a screening is triggered for an item (a "vendor") on a connected monday.com board — for example when the item is created or when you run the screening action (such as by clicking a button) — the Application submits the vendor name, and optionally the vendor's country if you have mapped a country column, to the OpenSanctions data service, evaluates the response, and writes an indicative risk level (**Clear**, **Warning**, or **Critical**) together with supporting notes back to the board. On the paid plans, the Application also maintains an exportable audit trail of past screenings and sends you a notification when a vendor screens as Critical. Plans differ in their monthly screening allowance, the number of connected boards, and the available features, as presented on the marketplace listing (see Section 4).
 
 ## 2. Informational Purpose Only — No Decision-Making (IMPORTANT)
 
