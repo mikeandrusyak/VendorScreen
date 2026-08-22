@@ -63,6 +63,64 @@
         opacity: 0.5;
         cursor: default;
       }
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .toggle-wrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--muted);
+        cursor: pointer;
+        user-select: none;
+      }
+      .toggle {
+        position: relative;
+        display: inline-block;
+        flex: 0 0 auto;
+        width: 36px;
+        height: 20px;
+      }
+      .toggle input {
+        position: absolute;
+        opacity: 0;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        cursor: pointer;
+      }
+      .toggle .slider {
+        position: absolute;
+        inset: 0;
+        background: var(--border);
+        border-radius: 999px;
+        transition: background 0.15s ease;
+      }
+      .toggle .slider::before {
+        content: "";
+        position: absolute;
+        left: 2px;
+        top: 2px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+        transition: transform 0.15s ease;
+      }
+      .toggle input:checked + .slider {
+        background: var(--accent);
+      }
+      .toggle input:checked + .slider::before {
+        transform: translateX(16px);
+      }
+      .toggle input:focus-visible + .slider {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
       .table-wrap {
         overflow-x: auto;
         border: 1px solid var(--border);
@@ -115,7 +173,16 @@
         <h1>Screening Audit</h1>
         <span id="count"></span>
       </div>
-      <button id="download" disabled>Download CSV</button>
+      <div class="actions">
+        <label class="toggle-wrap">
+          <span>Include Sidekick chat screenings</span>
+          <span class="toggle">
+            <input type="checkbox" id="includeAi" />
+            <span class="slider"></span>
+          </span>
+        </label>
+        <button id="download" disabled>Download CSV</button>
+      </div>
     </header>
     <div id="content"><div class="msg">Loading…</div></div>
 
@@ -127,6 +194,7 @@
 
       let boardId = null;
       let sessionToken = null;
+      const includeAiCheckbox = document.getElementById("includeAi");
 
       function esc(v) {
         return v == null ? "" : String(v).replace(/[&<>"]/g, (c) =>
@@ -152,12 +220,16 @@
         }
         countEl.textContent = rows.length + " screening" + (rows.length === 1 ? "" : "s");
         const head =
-          "<tr><th>Date</th><th>Vendor</th><th>Country</th><th>Risk</th>" +
+          "<tr><th>Date</th><th>Source</th><th>Vendor</th><th>Country</th><th>Risk</th>" +
           "<th>Type</th><th>Score</th><th>Match</th></tr>";
         const body = rows
           .map((r) => {
             const date = (r.created_at || "").replace("T", " ").slice(0, 19);
             const risk = esc(r.risk_level);
+            // Sidekick chat screenings carry no board_id — they aren't tied to
+            // this board, so label them distinctly rather than implying they
+            // came from an item on this board.
+            const source = r.board_id == null ? "Sidekick chat" : "This board";
             let match = esc(r.match_caption);
             if (r.match_id && r.match_caption) {
               const url =
@@ -168,6 +240,8 @@
             return (
               "<tr><td>" +
               esc(date) +
+              "</td><td>" +
+              esc(source) +
               "</td><td>" +
               esc(r.vendor_name) +
               "</td><td>" +
@@ -196,9 +270,11 @@
 
       async function loadAudit() {
         try {
-          const resp = await fetch("/view/audit.json?boardId=" + encodeURIComponent(boardId), {
-            headers: { Authorization: "Bearer " + sessionToken },
-          });
+          const includeAi = includeAiCheckbox.checked ? "1" : "0";
+          const resp = await fetch(
+            "/view/audit.json?boardId=" + encodeURIComponent(boardId) + "&includeAi=" + includeAi,
+            { headers: { Authorization: "Bearer " + sessionToken } }
+          );
           if (!resp.ok) throw new Error("HTTP " + resp.status);
           const data = await resp.json();
           renderTable(data.rows || []);
@@ -212,9 +288,11 @@
       async function downloadCsv() {
         downloadBtn.disabled = true;
         try {
-          const resp = await fetch("/view/audit.csv?boardId=" + encodeURIComponent(boardId), {
-            headers: { Authorization: "Bearer " + sessionToken },
-          });
+          const includeAi = includeAiCheckbox.checked ? "1" : "0";
+          const resp = await fetch(
+            "/view/audit.csv?boardId=" + encodeURIComponent(boardId) + "&includeAi=" + includeAi,
+            { headers: { Authorization: "Bearer " + sessionToken } }
+          );
           if (!resp.ok) throw new Error("HTTP " + resp.status);
           const blob = await resp.blob();
           const url = URL.createObjectURL(blob);
@@ -234,6 +312,7 @@
       }
 
       downloadBtn.addEventListener("click", downloadCsv);
+      includeAiCheckbox.addEventListener("change", loadAudit);
 
       async function init() {
         try {

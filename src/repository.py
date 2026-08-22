@@ -187,12 +187,17 @@ async def record_event(
         )
 
 
-async def list_events(account_id, board_id=None, limit: int = 10_000) -> list[dict]:
+async def list_events(
+    account_id, board_id=None, include_chat: bool = False, limit: int = 10_000
+) -> list[dict]:
     """Return an account's screening events, newest first, for CSV export.
 
     When `board_id` is given, restrict to that board (the board-view export is
-    board-scoped). Returns an empty list when the database is disabled. Capped by
-    `limit` so a single export can't stream an unbounded result set.
+    board-scoped). `include_chat` additionally pulls in conversational Sidekick
+    screenings (`board_id IS NULL`) alongside that board's own events — opt-in
+    since those screenings aren't actually tied to the board being viewed.
+    Returns an empty list when the database is disabled. Capped by `limit` so a
+    single export can't stream an unbounded result set.
     """
     pool = db.get_pool()
     if pool is None:
@@ -207,7 +212,10 @@ async def list_events(account_id, board_id=None, limit: int = 10_000) -> list[di
     board_id = _as_bigint(board_id)
     if board_id is not None:
         params.append(board_id)
-        select += f" AND board_id = ${len(params)}"
+        if include_chat:
+            select += f" AND (board_id = ${len(params)} OR board_id IS NULL)"
+        else:
+            select += f" AND board_id = ${len(params)}"
     params.append(limit)
     select += f" ORDER BY created_at DESC LIMIT ${len(params)}"
 
