@@ -424,7 +424,11 @@ def test_export_action_sends_notification_link(monkeypatch):
         sent["item_id"] = item_id
         sent["text"] = text
 
+    async def paid_plan(account_id):
+        return "pro"
+
     monkeypatch.setattr(main, "create_notification", fake_notify)
+    monkeypatch.setattr(repository, "get_plan", paid_plan)
 
     resp = client.post(
         EXPORT_URL,
@@ -437,6 +441,31 @@ def test_export_action_sends_notification_link(monkeypatch):
     assert sent["item_id"] == "456"
     # The notification carries a tokenized download link.
     assert "/audit/export?token=" in sent["text"]
+
+
+def test_export_action_free_plan_sends_upsell_not_link(monkeypatch):
+    monkeypatch.setenv("MONDAY_SIGNING_SECRET", "test-secret")
+    sent = {}
+
+    async def fake_notify(user_id, item_id, text, api_token):
+        sent["text"] = text
+
+    async def free_plan(account_id):
+        return "free"
+
+    monkeypatch.setattr(main, "create_notification", fake_notify)
+    monkeypatch.setattr(repository, "get_plan", free_plan)
+
+    resp = client.post(
+        EXPORT_URL,
+        json={"payload": {"inboundFieldValues": {"itemId": {"itemId": "456"}}}},
+        headers={"Authorization": f"Bearer {_export_jwt()}"},
+    )
+
+    assert resp.status_code == 200
+    # No download link — the user is told to upgrade instead.
+    assert "token=" not in sent["text"]
+    assert "Pro" in sent["text"] and "Business" in sent["text"]
 
 
 class _FakeRequest:
@@ -499,7 +528,11 @@ def test_export_link_uses_forwarded_host(monkeypatch):
     async def fake_notify(user_id, item_id, text, api_token):
         sent["text"] = text
 
+    async def paid_plan(account_id):
+        return "pro"
+
     monkeypatch.setattr(main, "create_notification", fake_notify)
+    monkeypatch.setattr(repository, "get_plan", paid_plan)
 
     resp = client.post(
         EXPORT_URL,
@@ -527,7 +560,11 @@ def test_export_link_uses_jwt_aud_host(monkeypatch):
     async def fake_notify(user_id, item_id, text, api_token):
         sent["text"] = text
 
+    async def paid_plan(account_id):
+        return "pro"
+
     monkeypatch.setattr(main, "create_notification", fake_notify)
+    monkeypatch.setattr(repository, "get_plan", paid_plan)
 
     token = jwt.encode(
         {
@@ -578,7 +615,11 @@ def test_download_streams_csv_for_valid_token(monkeypatch):
             }
         ]
 
+    async def paid_plan(account_id):
+        return "pro"
+
     monkeypatch.setattr(repository, "list_events", fake_list_events)
+    monkeypatch.setattr(repository, "get_plan", paid_plan)
 
     token = main.export_token.issue(777)
     resp = client.get(DOWNLOAD_URL, params={"token": token})
@@ -596,6 +637,20 @@ def test_download_streams_csv_for_valid_token(monkeypatch):
     assert "Russia" in body
     assert "sanction" in body
     assert "0.95" in body
+
+
+def test_download_free_plan_is_blocked(monkeypatch):
+    monkeypatch.setenv("MONDAY_SIGNING_SECRET", "test-secret")
+
+    async def free_plan(account_id):
+        return "free"
+
+    monkeypatch.setattr(repository, "get_plan", free_plan)
+
+    token = main.export_token.issue(777)
+    resp = client.get(DOWNLOAD_URL, params={"token": token})
+
+    assert resp.status_code == 402
 
 
 # --- board view --------------------------------------------------------------
@@ -655,7 +710,11 @@ def test_board_view_json_returns_board_scoped_rows(monkeypatch):
             }
         ]
 
+    async def paid_plan(account_id):
+        return "pro"
+
     monkeypatch.setattr(repository, "list_events", fake_list_events)
+    monkeypatch.setattr(repository, "get_plan", paid_plan)
 
     resp = client.get(
         VIEW_JSON_URL,
@@ -663,12 +722,44 @@ def test_board_view_json_returns_board_scoped_rows(monkeypatch):
         headers={"Authorization": f"Bearer {_session_jwt()}"},
     )
     assert resp.status_code == 200
-    rows = resp.json()["rows"]
+    body = resp.json()
+    assert body["locked"] is False
+    rows = body["rows"]
     assert len(rows) == 1
     assert rows[0]["vendor_name"] == "Bad Actor"
     assert rows[0]["country"] == "Russia"
     assert rows[0]["match_type"] == "sanction"
     assert rows[0]["created_at"] == "2026-07-11T09:00:00+00:00"
+
+
+def test_board_view_json_free_plan_returns_locked_teaser(monkeypatch):
+    monkeypatch.setenv("MONDAY_CLIENT_SECRET", "client-secret")
+
+    async def fake_list_events(account_id, board_id=None, include_chat=False, limit=10_000):
+        # Free plan asks for only the teaser slice, not the full history.
+        assert limit == main.TEASER_ROWS
+        return [{"created_at": "2026-07-11T09:00:00+00:00", "board_id": 123, "vendor_name": "X"}]
+
+    async def fake_count_events(account_id, board_id=None, include_chat=False):
+        return 42
+
+    async def free_plan(account_id):
+        return "free"
+
+    monkeypatch.setattr(repository, "list_events", fake_list_events)
+    monkeypatch.setattr(repository, "count_events", fake_count_events)
+    monkeypatch.setattr(repository, "get_plan", free_plan)
+
+    resp = client.get(
+        VIEW_JSON_URL,
+        params={"boardId": "123"},
+        headers={"Authorization": f"Bearer {_session_jwt()}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["locked"] is True
+    assert body["total"] == 42
+    assert len(body["rows"]) == 1
 
 
 def test_board_view_csv_streams_board_scoped(monkeypatch):
@@ -678,7 +769,11 @@ def test_board_view_csv_streams_board_scoped(monkeypatch):
         assert board_id == "123"
         return []
 
+    async def paid_plan(account_id):
+        return "business"
+
     monkeypatch.setattr(repository, "list_events", fake_list_events)
+    monkeypatch.setattr(repository, "get_plan", paid_plan)
 
     resp = client.get(
         VIEW_CSV_URL,
@@ -688,6 +783,22 @@ def test_board_view_csv_streams_board_scoped(monkeypatch):
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/csv")
     assert "board-123" in resp.headers["content-disposition"]
+
+
+def test_board_view_csv_free_plan_is_blocked(monkeypatch):
+    monkeypatch.setenv("MONDAY_CLIENT_SECRET", "client-secret")
+
+    async def free_plan(account_id):
+        return "free"
+
+    monkeypatch.setattr(repository, "get_plan", free_plan)
+
+    resp = client.get(
+        VIEW_CSV_URL,
+        params={"boardId": "123"},
+        headers={"Authorization": f"Bearer {_session_jwt()}"},
+    )
+    assert resp.status_code == 402
 
 
 def test_board_view_json_include_ai_passes_through(monkeypatch):
@@ -715,7 +826,11 @@ def test_board_view_csv_include_ai_changes_filename(monkeypatch):
         assert include_chat is True
         return []
 
+    async def paid_plan(account_id):
+        return "pro"
+
     monkeypatch.setattr(repository, "list_events", fake_list_events)
+    monkeypatch.setattr(repository, "get_plan", paid_plan)
 
     resp = client.get(
         VIEW_CSV_URL,

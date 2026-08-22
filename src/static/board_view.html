@@ -165,6 +165,56 @@
       .risk-Clear {
         color: #258750;
       }
+      /* --- Free-plan teaser --------------------------------------------- */
+      .teaser {
+        position: relative;
+      }
+      .teaser .blur {
+        filter: blur(4px);
+        pointer-events: none;
+        user-select: none;
+      }
+      .upgrade {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        text-align: center;
+        padding: 24px;
+        background: linear-gradient(
+          to bottom,
+          rgba(255, 255, 255, 0) 0%,
+          var(--bg) 55%
+        );
+      }
+      @media (prefers-color-scheme: dark) {
+        .upgrade {
+          background: linear-gradient(to bottom, rgba(28, 31, 59, 0) 0%, var(--bg) 55%);
+        }
+      }
+      .upgrade .headline {
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .upgrade .sub {
+        font-size: 13px;
+        color: var(--muted);
+        max-width: 340px;
+      }
+      .badge {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 1px 7px;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #fff;
+        font-size: 11px;
+        font-weight: 600;
+        vertical-align: middle;
+      }
     </style>
   </head>
   <body>
@@ -211,14 +261,9 @@
         return Number.isFinite(n) ? Math.round(n * 100) + "%" : "";
       }
 
-      function renderTable(rows) {
-        if (!rows.length) {
-          content.innerHTML =
-            '<div class="msg">No screenings recorded for this board yet.</div>';
-          countEl.textContent = "";
-          return;
-        }
-        countEl.textContent = rows.length + " screening" + (rows.length === 1 ? "" : "s");
+      // Build just the <table> markup for a set of rows (no empty-state / no
+      // teaser chrome — the caller decides how to frame it).
+      function tableMarkup(rows) {
         const head =
           "<tr><th>Date</th><th>Source</th><th>Vendor</th><th>Country</th><th>Risk</th>" +
           "<th>Type</th><th>Score</th><th>Match</th></tr>";
@@ -260,12 +305,57 @@
             );
           })
           .join("");
-        content.innerHTML =
+        return (
           '<div class="table-wrap"><table><thead>' +
           head +
           "</thead><tbody>" +
           body +
-          "</tbody></table></div>";
+          "</tbody></table></div>"
+        );
+      }
+
+      function render(data) {
+        const rows = data.rows || [];
+        const locked = !!data.locked;
+
+        // Export lives on paid plans only — reflect that in the button and (when
+        // locked) the CTA below. See MONETIZATION.md.
+        downloadBtn.disabled = locked;
+        downloadBtn.innerHTML = locked
+          ? 'Download CSV <span class="badge">Pro</span>'
+          : "Download CSV";
+        downloadBtn.title = locked ? "Upgrade to Pro or Business to export the audit" : "";
+
+        if (!rows.length) {
+          content.innerHTML =
+            '<div class="msg">No screenings recorded for this board yet.</div>';
+          countEl.textContent = "";
+          return;
+        }
+
+        if (!locked) {
+          countEl.textContent = rows.length + " screening" + (rows.length === 1 ? "" : "s");
+          content.innerHTML = tableMarkup(rows);
+          return;
+        }
+
+        // Free plan: blur the preview and overlay an upgrade prompt. `total` is
+        // the real number of screenings behind the wall.
+        const total = data.total || rows.length;
+        const hidden = Math.max(total - rows.length, 0);
+        countEl.textContent = total + " screening" + (total === 1 ? "" : "s");
+        const sub = hidden
+          ? hidden + " more " + (hidden === 1 ? "screening is" : "screenings are") +
+            " hidden on the Free plan. Upgrade to see your full audit history and export it."
+          : "Upgrade to Pro or Business to export your audit history to CSV.";
+        content.innerHTML =
+          '<div class="teaser"><div class="blur">' +
+          tableMarkup(rows) +
+          '</div><div class="upgrade">' +
+          '<div class="headline">Unlock your full screening audit</div>' +
+          '<div class="sub">' +
+          esc(sub) +
+          "</div></div></div>";
       }
 
       async function loadAudit() {
@@ -277,8 +367,7 @@
           );
           if (!resp.ok) throw new Error("HTTP " + resp.status);
           const data = await resp.json();
-          renderTable(data.rows || []);
-          downloadBtn.disabled = false;
+          render(data);
         } catch (err) {
           content.innerHTML =
             '<div class="msg">Could not load the audit (' + esc(err.message) + ").</div>";

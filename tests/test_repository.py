@@ -54,6 +54,24 @@ async def test_purge_account_noop_without_pool(monkeypatch):
     assert await repository.purge_account(12345) is False
 
 
+def test_is_paid_plan():
+    assert repository.is_paid_plan("pro") is True
+    assert repository.is_paid_plan("business") is True
+    assert repository.is_paid_plan("free") is False
+    assert repository.is_paid_plan("mystery") is False
+
+
+async def test_get_plan_defaults_to_free_without_pool(monkeypatch):
+    # DB disabled → fail-open to free rather than handing out a paid feature.
+    monkeypatch.setattr(db, "_pool", None)
+    assert await repository.get_plan(12345) == repository.DEFAULT_PLAN
+
+
+async def test_count_events_zero_without_pool(monkeypatch):
+    monkeypatch.setattr(db, "_pool", None)
+    assert await repository.count_events(1, board_id="123") == 0
+
+
 def test_as_bigint_coerces_and_tolerates_junk():
     assert repository._as_bigint("456") == 456
     assert repository._as_bigint(789) == 789

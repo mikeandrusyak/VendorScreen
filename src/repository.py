@@ -16,6 +16,15 @@ PLAN_LIMITS = {
 }
 DEFAULT_PLAN = "free"
 
+# Plans that unlock the audit log + export feature (see MONETIZATION.md: Free
+# has no audit export). Kept as a set so a new paid tier only has to be added
+# here, not spread across the gating checks in main.py.
+PAID_PLANS = frozenset({"pro", "business"})
+
+
+def is_paid_plan(plan: str) -> bool:
+    return plan in PAID_PLANS
+
 
 @dataclass
 class QuotaResult:
@@ -116,6 +125,46 @@ async def set_plan(account_id, plan: str) -> None:
             account_id,
             plan,
         )
+
+
+async def get_plan(account_id) -> str:
+    """Return the account's current plan, or DEFAULT_PLAN when the account is
+    unknown or the database is disabled. Read-only (unlike check_quota /
+    _get_or_create_account, it never creates a row) — used to feature-gate the
+    audit log + export without side effects. Fail-open to `free`: a DB outage
+    downgrades gracefully rather than handing out a paid feature."""
+    pool = db.get_pool()
+    if pool is None:
+        return DEFAULT_PLAN
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT plan FROM accounts WHERE account_id = $1", int(account_id)
+        )
+    return row["plan"] if row else DEFAULT_PLAN
+
+
+async def count_events(account_id, board_id=None, include_chat: bool = False) -> int:
+    """Total screening events matching the same scope as list_events. Used by the
+    board view teaser to tell a Free account how many rows are hidden behind the
+    upgrade wall. Returns 0 when the database is disabled."""
+    pool = db.get_pool()
+    if pool is None:
+        return 0
+
+    select = "SELECT COUNT(*) AS n FROM screening_events WHERE account_id = $1"
+    params = [int(account_id)]
+    board_id = _as_bigint(board_id)
+    if board_id is not None:
+        params.append(board_id)
+        if include_chat:
+            select += f" AND (board_id = ${len(params)} OR board_id IS NULL)"
+        else:
+            select += f" AND board_id = ${len(params)}"
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(select, *params)
+    return int(row["n"]) if row else 0
 
 
 async def purge_account(account_id) -> bool:

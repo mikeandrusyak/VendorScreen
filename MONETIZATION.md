@@ -63,6 +63,26 @@ deals until there's a real pattern of demand for one.
   its own design (and isn't necessarily supported cleanly by monday's
   monetization API) and shouldn't be built speculatively.
 
+## How the audit export gate works (technical)
+
+- **Audit log + export is a paid feature** (Pro/Business) — Free accounts can
+  screen vendors but not take their screening history with them. This is
+  enforced in code, not just priced: `repository.is_paid_plan(plan)` (paid =
+  `pro`/`business`, driven by the same `accounts.plan` the subscription webhook
+  syncs) gates every export path — `export_action` (sends an upgrade prompt
+  instead of a link), `/audit/export` (re-checks at download so a stale 15-min
+  link can't outlive a lapsed plan), and the board view's `/view/audit.csv`.
+- **Free still sees a teaser, not a wall.** The board view (`/view/audit.json`)
+  returns the most recent `TEASER_ROWS` screenings plus the true total for a
+  Free account; the frontend blurs the preview and overlays an upgrade CTA. The
+  point is conversion — Free users see the value of their own audit daily, and
+  the export (taking the data out) is the paid unlock. Paid plans get the full
+  table and a working CSV download.
+- **Fail-open to Free.** `repository.get_plan` returns `free` when the DB is
+  disabled or the account is unknown — a DB outage downgrades gracefully rather
+  than handing out a paid feature. (There's also no audit to export without a
+  DB, so this is consistent.)
+
 ## Roadmap: how P2/P3 features change pricing
 
 | Feature | Phase | Pricing treatment |

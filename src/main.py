@@ -511,6 +511,23 @@ async def export_action(request: Request):
             content={"error": "Export requires a userId and an itemId to notify"},
         )
 
+    # Audit export is a paid feature (see MONETIZATION.md: Free has no export).
+    # Notify the user with an upgrade prompt instead of a link rather than
+    # failing silently, so the action still "succeeds" from monday's side.
+    plan = await repository.get_plan(account_id)
+    if not repository.is_paid_plan(plan):
+        upsell = (
+            "Audit export is available on the Pro and Business plans. "
+            "Upgrade VendorScreen to export your screening history."
+        )
+        try:
+            await create_notification(user_id, item_id, upsell, api_token)
+        except Exception as err:
+            log.error("[export] failed to send upsell to user %s: %s", user_id, err)
+            sentry_sdk.capture_exception(err)
+        log.info("[export] blocked for account %s on %s plan", account_id, plan)
+        return {}
+
     token = export_token.issue(account_id)
     # Build the link from the public host (see public_base_url) — request.base_url
     # alone points at the internal Cloud Run host behind monday's proxy.
@@ -530,6 +547,12 @@ async def export_action(request: Request):
         )
 
     return {}
+
+
+# How many recent rows a Free account sees in the board view before the upgrade
+# wall (the rest are counted but not returned). The frontend blurs this preview
+# and overlays an upgrade CTA. Paid plans get the full table.
+TEASER_ROWS = 5
 
 
 AUDIT_COLUMNS = (
@@ -577,6 +600,15 @@ async def audit_export(token: str = ""):
     if account_id is None:
         return PlainTextResponse("Invalid or expired export link.", status_code=401)
 
+    # Re-check the plan at download time — the link is valid for 15 minutes and a
+    # plan can lapse, and export_action is the only place that mints these tokens,
+    # so this is defense-in-depth against a stale link outliving a subscription.
+    plan = await repository.get_plan(account_id)
+    if not repository.is_paid_plan(plan):
+        return PlainTextResponse(
+            "Audit export is available on the Pro and Business plans.", status_code=402
+        )
+
     events = await repository.list_events(account_id)
     return _audit_csv_response(events, f"vendorscreen-audit-{account_id}.csv")
 
@@ -613,8 +645,24 @@ async def board_view_audit_json(request: Request, boardId: str = "", includeAi: 
     if not boardId:
         return JSONResponse(status_code=400, content={"error": "boardId is required"})
 
-    events = await repository.list_events(account_id, board_id=boardId, include_chat=includeAi)
-    return {"rows": [_audit_row(e) for e in events]}
+    plan = await repository.get_plan(account_id)
+    if repository.is_paid_plan(plan):
+        events = await repository.list_events(account_id, board_id=boardId, include_chat=includeAi)
+        return {"locked": False, "plan": plan, "rows": [_audit_row(e) for e in events]}
+
+    # Free plan: return a blurred teaser (a handful of recent rows) plus the true
+    # total so the frontend can show "N more — upgrade to see all". Export stays
+    # blocked separately in board_view_audit_csv.
+    events = await repository.list_events(
+        account_id, board_id=boardId, include_chat=includeAi, limit=TEASER_ROWS
+    )
+    total = await repository.count_events(account_id, board_id=boardId, include_chat=includeAi)
+    return {
+        "locked": True,
+        "plan": plan,
+        "total": total,
+        "rows": [_audit_row(e) for e in events],
+    }
 
 
 @app.get("/view/audit.csv")
@@ -624,6 +672,12 @@ async def board_view_audit_csv(request: Request, boardId: str = "", includeAi: b
         return PlainTextResponse("Unauthorized", status_code=401)
     if not boardId:
         return PlainTextResponse("boardId is required", status_code=400)
+
+    plan = await repository.get_plan(account_id)
+    if not repository.is_paid_plan(plan):
+        return PlainTextResponse(
+            "Audit export is available on the Pro and Business plans.", status_code=402
+        )
 
     events = await repository.list_events(account_id, board_id=boardId, include_chat=includeAi)
     suffix = "-with-ai" if includeAi else ""
