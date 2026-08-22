@@ -156,13 +156,34 @@ def _clear_result():
     }
 
 
-async def match_vendor(vendor_name, country=None):
+def _api_key(account_id=None):
+    """Pick the OpenSanctions API key for this screening.
+
+    A fixed allowlist of test accounts (`TEST_ACCOUNT_IDS`, comma-separated) is
+    routed to a separate key (`OPENSANCTIONS_API_KEY_TEST`) so those screenings
+    don't draw on the global client key/budget; every other account uses
+    `OPENSANCTIONS_API_KEY`. The ids come from env (never hardcoded), per this
+    repo's multi-tenant discipline. Fail-open: any missing/incomplete test
+    config, or an account not on the list, falls back to the global key — so an
+    unset test var never breaks production screening.
+    """
+    test_ids = os.getenv("TEST_ACCOUNT_IDS")
+    test_key = os.getenv("OPENSANCTIONS_API_KEY_TEST")
+    if test_ids and test_key and account_id is not None:
+        allowed = {part.strip() for part in test_ids.split(",") if part.strip()}
+        if str(account_id) in allowed:
+            return test_key
+    return os.getenv("OPENSANCTIONS_API_KEY")
+
+
+async def match_vendor(vendor_name, country=None, account_id=None):
     """Screen a vendor via the OpenSanctions /match endpoint.
 
     Sends a structured entity (schema + name + optional country) and classifies
     the scored candidates into Clear / Warning / Critical. The returned dict also
     carries the driving match's score/id/caption so the caller (audit log) can
-    persist a trimmed summary without re-querying.
+    persist a trimmed summary without re-querying. `account_id` only selects which
+    API key is used (see _api_key) — it never changes the query itself.
     """
     critical, warning = _thresholds()
 
@@ -185,7 +206,7 @@ async def match_vendor(vendor_name, country=None):
         response = await client.post(
             f"{OPENSANCTIONS_BASE_URL}/match/default",
             json=body,
-            headers={"Authorization": f"ApiKey {os.getenv('OPENSANCTIONS_API_KEY')}"},
+            headers={"Authorization": f"ApiKey {_api_key(account_id)}"},
         )
     response.raise_for_status()
 
@@ -215,7 +236,9 @@ async def match_vendor(vendor_name, country=None):
     }
 
 
-async def check_vendor_with_retry(vendor_name, country=None, retries=3, delay_seconds=2.0):
+async def check_vendor_with_retry(
+    vendor_name, country=None, retries=3, delay_seconds=2.0, account_id=None
+):
     """Wrap match_vendor with retry logic for transient OpenSanctions failures.
 
     Retries on rate limiting (429), transient server errors (5xx), and
@@ -229,7 +252,7 @@ async def check_vendor_with_retry(vendor_name, country=None, retries=3, delay_se
     """
     for attempt in range(1, retries + 1):
         try:
-            return await match_vendor(vendor_name, country)
+            return await match_vendor(vendor_name, country, account_id=account_id)
         except httpx.HTTPStatusError as err:
             status = err.response.status_code
             if status not in RETRYABLE_STATUS:

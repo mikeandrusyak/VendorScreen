@@ -343,7 +343,7 @@ async def screen_vendor_name(vendor_name, country, account_id):
             return {"outputFields": {"resultMessage": msg, "riskLevel": RISK_LEVEL["LIMIT"]}}
 
     try:
-        result = await check_vendor_with_retry(vendor_name, country)
+        result = await check_vendor_with_retry(vendor_name, country, account_id=account_id)
     except Exception as err:
         # Covers SanctionsUnavailableError and anything unexpected — never leave
         # the Sidekick conversation without an answer.
@@ -885,7 +885,7 @@ async def process_vendor(
                 board_id,
             )
 
-            result = await check_vendor_with_retry(vendor_name, country)
+            result = await check_vendor_with_retry(vendor_name, country, account_id=account_id)
 
             log.info('[vendor] Result for "%s": %s', vendor_name, result["riskLevel"])
 

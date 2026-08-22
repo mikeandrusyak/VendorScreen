@@ -84,7 +84,9 @@ Only **secrets** live in the environment. Board and column IDs come from the rec
 |---|---|---|
 | `MONDAY_SIGNING_SECRET` | Monday Code + local | JWT verification for recipe action requests (Developer Center → App credentials → signing_secret) |
 | `MONDAY_CLIENT_SECRET` | Monday Code + local | Verifies the **board-view** session token (`monday.get('sessionToken')`), signed with the app's Client Secret — a *different* secret from the signing secret above (Developer Center → App credentials → client_secret). Required for the Screening Audit board view. |
-| `OPENSANCTIONS_API_KEY` | Monday Code + local | OpenSanctions authentication |
+| `OPENSANCTIONS_API_KEY` | Monday Code + local | OpenSanctions authentication — the **global** key used for every customer account. |
+| `OPENSANCTIONS_API_KEY_TEST` | **optional** | Separate OpenSanctions key used **only** for the accounts listed in `TEST_ACCOUNT_IDS`, so dev/marketplace-review screenings don't draw on the global client key/budget. Requires `TEST_ACCOUNT_IDS` too; if either is unset the account falls back to the global key (fail-open). |
+| `TEST_ACCOUNT_IDS` | **optional** | Comma-separated allowlist of monday account ids routed to `OPENSANCTIONS_API_KEY_TEST` (e.g. `35855878,36524982`). Every other account uses the global key. The ids live in env, never hardcoded, per the multi-tenant rule. |
 | `NODE_ENV` | Monday Code + local | `production` in deploy (enforces JWT verification), `development` locally (enables the `MONDAY_API_TOKEN` fallback). **Defaults to `production` (fail-closed)** when unset, so a missing/misspelled value never silently disables auth. |
 | `MONDAY_API_TOKEN` | **local dev only** | Personal API token used only when no `Authorization` header is present (dev mode). Not needed in production — the token comes from the JWT. |
 | `SENTRY_DSN` | **optional** | Enables Sentry error tracking when set. Unset = tracking disabled, app runs unchanged. PII is never sent (`send_default_pii=False`). |

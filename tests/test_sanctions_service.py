@@ -6,6 +6,7 @@ from sanctions_service import (
     DISCLAIMER,
     RISK_LEVEL,
     SanctionsUnavailableError,
+    _api_key,
     check_vendor_with_retry,
     match_vendor,
     unavailable_result,
@@ -33,6 +34,60 @@ def _entity(id, caption, score, *, datasets=None, topics=None):
 
 def test_with_disclaimer_appends_notice():
     assert with_disclaimer("hello") == f"hello{DISCLAIMER}"
+
+
+def test_api_key_uses_global_by_default(monkeypatch):
+    monkeypatch.setenv("OPENSANCTIONS_API_KEY", "global-key")
+    monkeypatch.delenv("TEST_ACCOUNT_IDS", raising=False)
+    monkeypatch.delenv("OPENSANCTIONS_API_KEY_TEST", raising=False)
+    # No test config → everyone (even a given account) gets the global key.
+    assert _api_key() == "global-key"
+    assert _api_key(35855878) == "global-key"
+
+
+def test_api_key_uses_test_key_for_listed_accounts(monkeypatch):
+    monkeypatch.setenv("OPENSANCTIONS_API_KEY", "global-key")
+    monkeypatch.setenv("OPENSANCTIONS_API_KEY_TEST", "test-key")
+    monkeypatch.setenv("TEST_ACCOUNT_IDS", "35855878, 36524982")
+    # Every account on the allowlist is routed to the test key; string/int agnostic
+    # and tolerant of whitespace around the commas.
+    assert _api_key(35855878) == "test-key"
+    assert _api_key("36524982") == "test-key"
+    # Any account not on the list still uses the global key.
+    assert _api_key(99999999) == "global-key"
+    assert _api_key() == "global-key"
+
+
+def test_api_key_falls_back_to_global_when_test_key_missing(monkeypatch):
+    monkeypatch.setenv("OPENSANCTIONS_API_KEY", "global-key")
+    monkeypatch.setenv("TEST_ACCOUNT_IDS", "35855878")
+    monkeypatch.delenv("OPENSANCTIONS_API_KEY_TEST", raising=False)
+    # Incomplete test config (ids set, key missing) fails open to the global key.
+    assert _api_key(35855878) == "global-key"
+
+
+@respx.mock
+async def test_match_vendor_sends_test_key_for_listed_account(monkeypatch):
+    monkeypatch.setenv("OPENSANCTIONS_API_KEY", "global-key")
+    monkeypatch.setenv("OPENSANCTIONS_API_KEY_TEST", "test-key")
+    monkeypatch.setenv("TEST_ACCOUNT_IDS", "35855878,36524982")
+    route = respx.post(MATCH_URL).mock(return_value=_mock([]))
+
+    await match_vendor("Acme", account_id=36524982)
+
+    assert route.calls.last.request.headers["authorization"] == "ApiKey test-key"
+
+
+@respx.mock
+async def test_match_vendor_sends_global_key_for_other_account(monkeypatch):
+    monkeypatch.setenv("OPENSANCTIONS_API_KEY", "global-key")
+    monkeypatch.setenv("OPENSANCTIONS_API_KEY_TEST", "test-key")
+    monkeypatch.setenv("TEST_ACCOUNT_IDS", "35855878,36524982")
+    route = respx.post(MATCH_URL).mock(return_value=_mock([]))
+
+    await match_vendor("Acme", account_id=99999999)
+
+    assert route.calls.last.request.headers["authorization"] == "ApiKey global-key"
 
 
 @respx.mock

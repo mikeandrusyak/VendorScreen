@@ -145,7 +145,7 @@ def test_screen_by_name_returns_output_fields(monkeypatch):
     monkeypatch.setenv("MONDAY_API_TOKEN", "dev-token")
     monkeypatch.setattr(main.db, "is_configured", lambda: False)
 
-    async def fake_check(vendor_name, country=None):
+    async def fake_check(vendor_name, country=None, account_id=None):
         assert vendor_name == "Rosneft"
         return {"riskLevel": "Critical", "details": "sanction match"}
 

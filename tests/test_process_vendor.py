@@ -12,7 +12,7 @@ def _stub_screening(monkeypatch, *, name="Acme", result=None):
         calls["get_item_name"] = True
         return name
 
-    async def fake_check(vendor_name, country=None):
+    async def fake_check(vendor_name, country=None, account_id=None):
         calls["check"] = vendor_name
         calls["country"] = country
         return result or {"riskLevel": "Clear", "details": "ok"}
@@ -351,7 +351,7 @@ async def test_sanctions_unavailable_marks_board_failed(monkeypatch):
     monkeypatch.setattr(main.db, "is_configured", lambda: False)
     calls = _stub_screening(monkeypatch)
 
-    async def boom(vendor_name, country=None):
+    async def boom(vendor_name, country=None, account_id=None):
         raise SanctionsUnavailableError("still down after 3 attempts")
 
     monkeypatch.setattr(main, "check_vendor_with_retry", boom)
@@ -368,7 +368,7 @@ async def test_unexpected_error_marks_board_failed(monkeypatch):
     monkeypatch.setattr(main.db, "is_configured", lambda: False)
     calls = _stub_screening(monkeypatch)
 
-    async def boom(vendor_name, country=None):
+    async def boom(vendor_name, country=None, account_id=None):
         raise RuntimeError("something unrelated to sanctions broke")
 
     monkeypatch.setattr(main, "check_vendor_with_retry", boom)
@@ -390,7 +390,7 @@ async def test_screening_writes_single_final_status(monkeypatch):
     async def fake_get_item_name(item_id, api_token):
         return "Acme"
 
-    async def fake_check(vendor_name, country=None):
+    async def fake_check(vendor_name, country=None, account_id=None):
         # No status must have been written before the real screening result.
         assert updates == []
         return {"riskLevel": "Clear", "details": "ok"}
@@ -433,7 +433,7 @@ async def test_screen_vendor_name_returns_result_without_board(monkeypatch):
     # to a board (no item/columns involved).
     monkeypatch.setattr(main.db, "is_configured", lambda: False)
 
-    async def fake_check(vendor_name, country=None):
+    async def fake_check(vendor_name, country=None, account_id=None):
         assert vendor_name == "Acme"
         return {"riskLevel": "Warning", "details": "possible pep flag"}
 
@@ -457,7 +457,7 @@ async def test_screen_vendor_name_over_quota_is_limit_reached(monkeypatch):
     async def fake_quota(account_id):
         return QuotaResult(allowed=False, used=20, limit=20, plan="free")
 
-    async def fake_check(vendor_name, country=None):
+    async def fake_check(vendor_name, country=None, account_id=None):
         raise AssertionError("must not screen when over quota")
 
     monkeypatch.setattr(main.repository, "check_quota", fake_quota)
@@ -473,7 +473,7 @@ async def test_screen_vendor_name_failure_is_unavailable(monkeypatch):
     # A screening failure never raises to Sidekick — it returns the fail-safe result.
     monkeypatch.setattr(main.db, "is_configured", lambda: False)
 
-    async def boom(vendor_name, country=None):
+    async def boom(vendor_name, country=None, account_id=None):
         raise SanctionsUnavailableError("down")
 
     monkeypatch.setattr(main, "check_vendor_with_retry", boom)
