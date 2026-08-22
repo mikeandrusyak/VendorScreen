@@ -169,7 +169,9 @@
       .teaser {
         position: relative;
       }
-      .teaser .blur {
+      /* Keep the newest row sharp as a taste of the value; blur the rest so the
+         upgrade prompt has something concrete to sit over. */
+      .teaser tbody tr:not(:first-child) {
         filter: blur(4px);
         pointer-events: none;
         user-select: none;
@@ -349,9 +351,9 @@
             " hidden on the Free plan. Upgrade to see your full audit history and export it."
           : "Upgrade to Pro or Business to export your audit history to CSV.";
         content.innerHTML =
-          '<div class="teaser"><div class="blur">' +
+          '<div class="teaser">' +
           tableMarkup(rows) +
-          '</div><div class="upgrade">' +
+          '<div class="upgrade">' +
           '<div class="headline">Unlock your full screening audit</div>' +
           '<div class="sub">' +
           esc(sub) +
