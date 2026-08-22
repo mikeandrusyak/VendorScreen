@@ -208,17 +208,6 @@
         font-size: 13px;
         color: var(--muted);
       }
-      .badge {
-        display: inline-block;
-        margin-left: 6px;
-        padding: 1px 7px;
-        border-radius: 999px;
-        background: var(--accent);
-        color: #fff;
-        font-size: 11px;
-        font-weight: 600;
-        vertical-align: middle;
-      }
     </style>
   </head>
   <body>
@@ -248,6 +237,11 @@
 
       let boardId = null;
       let sessionToken = null;
+      // Whether the current account is on a Free plan (export is a paid feature).
+      // The button stays enabled and normal-looking; a Free click opens monday's
+      // plan-selection flow instead of downloading. Export is also enforced
+      // server-side (402), so this is UX, not the security boundary.
+      let locked = false;
       const includeAiCheckbox = document.getElementById("includeAi");
 
       function esc(v) {
@@ -320,15 +314,11 @@
 
       function render(data) {
         const rows = data.rows || [];
-        const locked = !!data.locked;
+        locked = !!data.locked;
 
-        // Export lives on paid plans only — reflect that in the button and (when
-        // locked) the CTA below. See MONETIZATION.md.
-        downloadBtn.disabled = locked;
-        downloadBtn.innerHTML = locked
-          ? 'Download CSV <span class="badge">Pro</span>'
-          : "Download CSV";
-        downloadBtn.title = locked ? "Upgrade to Pro or Business to export the audit" : "";
+        // The button always looks/behaves normal; a Free-plan click is handled in
+        // downloadCsv (opens the upgrade flow) rather than being disabled here.
+        downloadBtn.disabled = false;
 
         if (!rows.length) {
           content.innerHTML =
@@ -378,7 +368,32 @@
         }
       }
 
+      // Open monday's plan-selection flow so a Free user can upgrade to unlock
+      // export. Only works on a live marketplace app (not draft/dev or mobile),
+      // so fall back to an in-app notice when it isn't available.
+      async function promptUpgrade() {
+        try {
+          await monday.execute("openPlanSelection", { isInPlanSelection: true });
+        } catch (err) {
+          try {
+            await monday.execute("notice", {
+              message:
+                "Audit export is available on the Pro and Business plans. " +
+                "Upgrade VendorScreen to export your screening history.",
+              type: "info",
+              timeout: 10000,
+            });
+          } catch (e) {
+            /* nothing more we can do from inside the iframe */
+          }
+        }
+      }
+
       async function downloadCsv() {
+        if (locked) {
+          promptUpgrade();
+          return;
+        }
         downloadBtn.disabled = true;
         try {
           const includeAi = includeAiCheckbox.checked ? "1" : "0";
