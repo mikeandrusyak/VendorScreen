@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>How to use VendorScreen</title>
+  <meta name="description" content="Install VendorScreen and set up automatic sanctions & PEP screening on your monday.com board — step by step." />
+  <link rel="icon" type="image/png" href="assets/icon.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="index.html">
+        <img src="assets/icon.png" alt="VendorScreen logo" />
+        <span>VendorScreen</span>
+      </a>
+      <nav class="nav-links">
+        <a href="index.html#features">Features</a>
+        <a href="privacy.html">Privacy</a>
+        <a class="nav-cta" href="index.html#get">Get it</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="legal">
+    <div class="wrap">
+      <a class="back" href="index.html">← Back to home</a>
+      <h1>How to use VendorScreen</h1>
+      <p class="meta">A step-by-step guide to installing VendorScreen and screening vendors against sanctions &amp; PEP lists — right on your monday.com board.</p>
+
+      <hr />
+
+      <h2>What VendorScreen does</h2>
+      <p>VendorScreen checks each vendor you add to a board against global sanctions and PEP (politically exposed person) watchlists (via OpenSanctions) and writes an indicative result — <strong>Clear</strong>, <strong>Warning</strong>, or <strong>Critical</strong> — plus supporting details back to your board. It can run automatically when an item is created, on a button click, or straight from monday's AI chat.</p>
+
+      <h2>Before you start (prerequisites)</h2>
+      <ul>
+        <li>A monday.com account where you can add apps and build automations.</li>
+        <li>A board where your vendors/suppliers live (one row = one vendor).</li>
+        <li>Two columns to hold the result: a <strong>Status</strong> column and a <strong>Long&nbsp;Text</strong> (or Text) column. Optionally a <strong>Country</strong> text column to sharpen matching.</li>
+      </ul>
+
+      <h2>Step 1 — Install the app</h2>
+      <p>Open the VendorScreen listing in the monday.com marketplace and click <strong>Install</strong>. Approve the requested permissions (read/write your boards and send notifications). VendorScreen is not tied to any specific board — you choose the board and columns when you set up the automation.</p>
+
+      <h2>Step 2 — Prepare your board</h2>
+      <ol>
+        <li>Open the board with your vendors.</li>
+        <li>Make sure it has a <strong>Status</strong> column (this will show Clear / Warning / Critical) and a <strong>Long Text</strong> column (this will hold the match details and source link).</li>
+        <li>Optional: add a <strong>Country</strong> text column if you want to pass the vendor's country into the screening.</li>
+      </ol>
+
+      <h2>Step 3 — Add the “Vendor Screener” automation</h2>
+      <ol>
+        <li>On the board, open <strong>Automate</strong> (or the Integrations / Apps area) and find <strong>VendorScreen</strong>.</li>
+        <li>Choose the <strong>Vendor Screener</strong> template: <em>“When an item is created, screen the vendor and set Screen Status with details in Screening details.”</em></li>
+        <li>Map the fields to your columns: <strong>Screen Status</strong> → your Status column, <strong>Screening details</strong> → your Long Text column, and (optionally) <strong>Vendor Country</strong> → your Country column.</li>
+        <li>Click <strong>Create automation</strong>.</li>
+      </ol>
+      <p>Prefer to screen on demand instead of automatically? Use the button-based recipe — add a <strong>Button</strong> column and choose the “When the button is clicked, screen the vendor…” variant. Same field mapping.</p>
+
+      <h2>Step 4 — Screen a vendor</h2>
+      <p>Add a new vendor item (or click the button, if you chose that recipe). Within a few seconds VendorScreen fills in the result automatically — no manual lookups.</p>
+
+      <h2>Step 5 — Read the result</h2>
+      <ul>
+        <li><strong>Clear</strong> — no sanction or PEP match was found.</li>
+        <li><strong>Warning</strong> — a possible PEP or sanction-related flag worth reviewing.</li>
+        <li><strong>Critical</strong> — a likely direct sanction match.</li>
+      </ul>
+      <p>The Screening details column always explains <em>why</em>: the matched entity name, the match score, and a link to the source profile on OpenSanctions.</p>
+
+      <h2>Step 6 — Get alerted on high risk</h2>
+      <p>When a vendor screens as <strong>Critical</strong>, the person who set up the automation receives an instant monday notification anchored to that item, so high-risk vendors are never missed.</p>
+
+      <h2>Step 7 — Review and export the audit trail</h2>
+      <ol>
+        <li>Add the <strong>Screening Audit</strong> board view to your board (the “+” next to your board tabs → VendorScreen → Screening Audit).</li>
+        <li>See every past screening — date, vendor, country, risk, match, and score.</li>
+        <li>Click <strong>Download CSV</strong> to export the log for your compliance records.</li>
+      </ol>
+
+      <h2>Step 8 — Screen straight from chat (AI)</h2>
+      <ol>
+        <li>Open monday's <strong>Sidekick</strong> AI assistant.</li>
+        <li>Enable the <strong>“Screen vendor for sanctions &amp; PEP risk”</strong> skill (via the “Use skills” button).</li>
+        <li>Ask, e.g. <em>“Screen Rosneft for sanctions.”</em> Sidekick returns the risk level, match, confidence, and source link — no board or setup required.</li>
+      </ol>
+
+      <h2>Plans</h2>
+      <p>Every plan can screen vendors. The audit trail / CSV export and Critical alerts are available on the paid plans; plans also differ in the number of screenings per month and the number of connected boards, as shown on the marketplace listing.</p>
+
+      <h2>Good to know</h2>
+      <p>VendorScreen provides <strong>informational screening only</strong> to support your due-diligence process. It does not make compliance decisions — always verify results independently before acting. See our <a href="terms.html">Terms of Service</a> and <a href="privacy.html">Privacy Policy</a>.</p>
+
+      <p style="margin-top:2rem;">Questions? Contact <a href="mailto:andrusyakmd@gmail.com">andrusyakmd@gmail.com</a>.</p>
+    </div>
+  </main>
+
+</body>
+</html>
