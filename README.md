@@ -29,7 +29,9 @@ Recipe trigger: "When button clicked"
               │     └── retries 429/5xx/network; if still down → Screening Failed
               ├── monday_service.update_vendor_record()
               │     └── writes status by LABEL (create_labels_if_missing) + details text
-              ├── repository.record_event()  → append outcome to audit log (if DB on)
+              ├── repository.record_event()  → append outcome to audit log (if DB on),
+              │     keyed by the same resolved board_id used to write the board above —
+              │     this is what the Screening Audit board view later filters by
               └── if Critical → create_notification() alerts the automation owner
 ```
 
