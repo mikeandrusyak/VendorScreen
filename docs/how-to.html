@@ -38,14 +38,14 @@
       <hr />
 
       <h2>What VendorScreen does</h2>
-      <p>VendorScreen checks each vendor you add to a board against global sanctions and PEP (politically exposed person) watchlists (via OpenSanctions) and writes an indicative result — <strong>Clear</strong>, <strong>Warning</strong>, or <strong>Critical</strong> — plus supporting details back to your board. It can run automatically when an item is created, on a button click, or straight from monday's AI chat.</p>
+      <p>VendorScreen checks each vendor you add to a board against global sanctions and PEP (politically exposed person) watchlists (via OpenSanctions) and writes an indicative result — <strong>Clear</strong>, <strong>Warning</strong>, or <strong>Critical</strong> — plus supporting details back to your board. Trigger it on demand with a button click, or straight from monday's AI chat.</p>
 
       <h2>Before you start (prerequisites)</h2>
       <ul>
         <li>A monday.com account where you can add apps and build automations.</li>
         <li>A board where your vendors/suppliers live (one row = one vendor).</li>
         <li>Two columns to hold the result: a <strong>Status</strong> column and a <strong>Text</strong> column. Optionally a <strong>Country</strong> column to sharpen matching.</li>
-        <li>Optionally a <strong>Button</strong> column, if you'd rather screen a vendor on demand with a click than automatically on creation.</li>
+        <li>A <strong>Button</strong> column — this is how you trigger a screening on demand, with a click.</li>
       </ul>
 
       <h2>Step 1 — Install the app</h2>
@@ -56,13 +56,13 @@
         <li>Open the board with your vendors.</li>
         <li>Make sure it has a <strong>Status</strong> column (this will show Clear / Warning / Critical) and a <strong>Text</strong> column (this will hold the match details and source link).</li>
         <li>Optional: add a <strong>Country</strong> column if you want to pass the vendor's country into the screening.</li>
-        <li>Optional: add a <strong>Button</strong> column (e.g. labelled “Vendor Screen”) if you want to trigger screening manually with a click.</li>
+        <li>Add a <strong>Button</strong> column (e.g. labelled “Vendor Screen”) — you'll click it to trigger each screening.</li>
       </ol>
 
       <h2>Step 3 — Add the “Vendor Screener” automation</h2>
       <ol>
         <li>On the board, open <strong>Automate</strong> (or the Integrations / Apps area) and find <strong>VendorScreen</strong>.</li>
-        <li>Choose the <strong>Vendor Screener</strong> template: <em>“When an item is created, screen the vendor and set Screen Status with details in Screening details.”</em></li>
+        <li>Choose the <strong>Vendor Screener</strong> template: <em>“When the button is clicked, screen the vendor and set Screen Status with details in Screening details.”</em></li>
         <li>Map the fields to your columns: <strong>Screen Status</strong> → your Status column, <strong>Screening details</strong> → your Text column, and (optionally) <strong>Vendor Country</strong> → your Country column.</li>
         <li>Click <strong>Create automation</strong>.</li>
       </ol>
@@ -70,16 +70,11 @@
         <img src="assets/shot-setup.png" alt="The Vendor Screener automation template, mapping Screen Status, Screening details and Vendor Country columns." loading="lazy" />
         <figcaption>The ready-made “Vendor Screener” recipe — map it to your columns and click Create automation.</figcaption>
       </figure>
-      <p>The recipe comes in two trigger flavours — pick whichever fits your workflow:</p>
-      <ul>
-        <li><strong>Automatic</strong> — <em>“When an item is created, screen the vendor…”</em> runs on every new vendor with no clicks.</li>
-        <li><strong>On demand</strong> — <em>“When the button is clicked, screen the vendor…”</em> (shown above) screens only when someone clicks the <strong>Vendor Screen</strong> button on a row. Add a Button column for this one.</li>
-      </ul>
-      <p>Both use the same field mapping (Screen Status, Screening details, and optional Vendor Country).</p>
+      <p>Screening runs on demand: click the <strong>Vendor Screen</strong> button on a row whenever you want that vendor checked.</p>
       <p><strong>Tip:</strong> the column and button names are up to you — VendorScreen uses the columns you pick in the mapping, not their labels. Call them anything that fits your board.</p>
 
       <h2>Step 4 — Screen a vendor</h2>
-      <p>Add a new vendor item (or click the button, if you chose that recipe). Within a few seconds VendorScreen fills in the result automatically — no manual lookups.</p>
+      <p>Click the <strong>Vendor Screen</strong> button on a row. Within a few seconds VendorScreen fills in the result automatically — no manual lookups.</p>
 
       <h2>Step 5 — Read the result</h2>
       <ul>
