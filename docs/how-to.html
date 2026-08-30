@@ -7,6 +7,11 @@
   <meta name="description" content="Install VendorScreen and set up automatic sanctions & PEP screening on your monday.com board — step by step." />
   <link rel="icon" type="image/png" href="assets/icon.png" />
   <link rel="stylesheet" href="style.css" />
+  <style>
+    .guide-shot { margin: 18px 0 28px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+    .guide-shot img { width: 100%; display: block; }
+    .guide-shot figcaption { padding: 10px 16px; font-size: 14px; color: var(--text-soft); background: var(--bg-soft); }
+  </style>
 </head>
 <body>
 
@@ -59,6 +64,10 @@
         <li>Map the fields to your columns: <strong>Screen Status</strong> → your Status column, <strong>Screening details</strong> → your Long Text column, and (optionally) <strong>Vendor Country</strong> → your Country column.</li>
         <li>Click <strong>Create automation</strong>.</li>
       </ol>
+      <figure class="guide-shot">
+        <img src="assets/shot-setup.png" alt="The Vendor Screener automation template, mapping Screen Status, Screening details and Vendor Country columns." loading="lazy" />
+        <figcaption>The ready-made “Vendor Screener” recipe — map it to your columns and click Create automation.</figcaption>
+      </figure>
       <p>Prefer to screen on demand instead of automatically? Use the button-based recipe — add a <strong>Button</strong> column and choose the “When the button is clicked, screen the vendor…” variant. Same field mapping.</p>
 
       <h2>Step 4 — Screen a vendor</h2>
@@ -71,9 +80,17 @@
         <li><strong>Critical</strong> — a likely direct sanction match.</li>
       </ul>
       <p>The Screening details column always explains <em>why</em>: the matched entity name, the match score, and a link to the source profile on OpenSanctions.</p>
+      <figure class="guide-shot">
+        <img src="assets/shot-statuses.png" alt="A board showing Critical, Clear and Warning screening statuses with matching details for each vendor." loading="lazy" />
+        <figcaption>Each vendor gets a clear status and the reasoning behind it, written straight to your board.</figcaption>
+      </figure>
 
       <h2>Step 6 — Get alerted on high risk</h2>
       <p>When a vendor screens as <strong>Critical</strong>, the person who set up the automation receives an instant monday notification anchored to that item, so high-risk vendors are never missed.</p>
+      <figure class="guide-shot">
+        <img src="assets/shot-alert.png" alt="A monday notification alerting that a vendor screened as Critical and needs review." loading="lazy" />
+        <figcaption>An instant notification lands the moment a vendor is flagged Critical.</figcaption>
+      </figure>
 
       <h2>Step 7 — Review and export the audit trail</h2>
       <ol>
@@ -81,6 +98,10 @@
         <li>See every past screening — date, vendor, country, risk, match, and score.</li>
         <li>Click <strong>Download CSV</strong> to export the log for your compliance records.</li>
       </ol>
+      <figure class="guide-shot">
+        <img src="assets/shot-audit.png" alt="The Screening Audit board view listing past screenings with date, vendor, country, risk, match and score, and a Download CSV button." loading="lazy" />
+        <figcaption>The Screening Audit view — a full, exportable history of every screening.</figcaption>
+      </figure>
 
       <h2>Step 8 — Screen straight from chat (AI)</h2>
       <ol>
@@ -88,6 +109,10 @@
         <li>Enable the <strong>“Screen vendor for sanctions &amp; PEP risk”</strong> skill (via the “Use skills” button).</li>
         <li>Ask, e.g. <em>“Screen Rosneft for sanctions.”</em> Sidekick returns the risk level, match, confidence, and source link — no board or setup required.</li>
       </ol>
+      <figure class="guide-shot">
+        <img src="assets/shot-ai-chat.png" alt="monday's Sidekick AI returning a structured sanctions screening result with risk level, match, confidence and source link." loading="lazy" />
+        <figcaption>Screen a vendor conversationally from monday’s Sidekick AI — no board needed.</figcaption>
+      </figure>
 
       <h2>Plans</h2>
       <p>Every plan can screen vendors. The audit trail / CSV export and Critical alerts are available on the paid plans; plans also differ in the number of screenings per month and the number of connected boards, as shown on the marketplace listing.</p>
