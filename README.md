@@ -142,7 +142,7 @@ The code does nothing until the integration recipe is configured. Field names be
    - `boardId` — type **Board**
    - `itemId` — type **Item** (from the trigger)
    - `statusColumnId` — type **Status Column** (picker)
-   - `detailsColumnId` — type **Text / Long Text Column** (picker)
+   - `detailsColumnId` — type **Text Column** (picker)
    - `countryColumnId` — type **Country / Text Column** (picker), **optional** — when mapped, the vendor's country is sent to OpenSanctions `/match` to sharpen scoring and cut false positives
 4. **Action URL:** `https://<your-app>.monday.app/monday/execute_action`
 5. **Recipe sentence:** *"When an item is created, screen the vendor and set {statusColumn} with details in {detailsColumn}"* — this is where the customer maps their own columns.
