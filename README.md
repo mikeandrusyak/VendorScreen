@@ -1,6 +1,6 @@
 # VendorScreen
 
-Automated KYC/AML compliance screening for vendors on Monday.com boards. It ships as a Monday.com **integration recipe**: when a new item is created, the app queries the OpenSanctions API and writes a risk level — **Clear**, **Warning**, or **Critical** — plus supporting notes back to the columns the customer chose.
+Automated KYC/AML compliance screening for vendors on Monday.com boards. It ships as a Monday.com **integration recipe**: on a button click, the app queries the OpenSanctions API and writes a risk level — **Clear**, **Warning**, or **Critical** — plus supporting notes back to the columns the customer chose.
 
 If OpenSanctions is temporarily unreachable, the app retries transient failures (429 / 5xx / network errors) with backoff and, if it still can't complete, writes a **Screening Failed** status instead of leaving the record blank — so the check is never lost silently and the customer can re-run it.
 
@@ -11,15 +11,15 @@ If OpenSanctions is temporarily unreachable, the app retries transient failures 
 The app is **multi-tenant** — it is not tied to any specific board. Each customer wires it up through the recipe UI, and Monday.com passes the board/column IDs to the app at runtime.
 
 ```
-Recipe trigger: "When an item is created"
+Recipe trigger: "When button clicked"
   └── Monday POSTs to /monday/execute_action
         ├── Challenge handshake (action URL registration only)
         ├── JWT verification via MONDAY_SIGNING_SECRET (production)
         ├── reads payload.inboundFieldValues → boardId, itemId, statusColumnId,
         │     detailsColumnId, [countryColumnId — optional]
         │     (chosen by the CUSTOMER in the automation UI — NOT from .env)
-        │     if boardId is absent (some triggers, e.g. "When button clicked",
-        │     don't reliably pass it) → resolved from itemId via get_item_board_id()
+        │     "When button clicked" doesn't reliably pass boardId
+        │     → resolved from itemId via get_item_board_id()
         ├── 200 OK returned immediately
         └── async process_vendor()
               ├── monday_service.get_item_name(item_id)   → vendor name
@@ -137,7 +137,7 @@ Use the generated HTTPS URL + `/monday/execute_action` as the action URL while t
 The code does nothing until the integration recipe is configured. Field names below **must match** those read in `main.py` (`boardId`, `itemId`, `statusColumnId`, `detailsColumnId`).
 
 1. **Create App → Add Feature → Integration.**
-2. **Trigger:** built-in *"When an item is created"* (Monday manages the subscription and supplies `boardId` + `itemId`).
+2. **Trigger:** built-in *"When button clicked"* (trigger output is only `userId, itemId, groupId, item` — no `boardId`; `execute_action` resolves it from `itemId` via `get_item_board_id()`, see the boardId fallback above).
 3. **Custom Action** *"Screen vendor & update status"* with input fields:
    - `boardId` — type **Board**
    - `itemId` — type **Item** (from the trigger)
@@ -145,7 +145,7 @@ The code does nothing until the integration recipe is configured. Field names be
    - `detailsColumnId` — type **Text Column** (picker)
    - `countryColumnId` — type **Country / Text Column** (picker), **optional** — when mapped, the vendor's country is sent to OpenSanctions `/match` to sharpen scoring and cut false positives
 4. **Action URL:** `https://<your-app>.monday.app/monday/execute_action`
-5. **Recipe sentence:** *"When an item is created, screen the vendor and set {statusColumn} with details in {detailsColumn}"* — this is where the customer maps their own columns.
+5. **Recipe sentence:** *"When button is clicked, screen the vendor and set {statusColumn} with details in {detailsColumn}"* — this is where the customer maps their own columns.
 6. **(Optional) Export action** *"Export screening audit"* — a button-triggered recipe with a single `itemId` input field, action URL `https://<your-app>.monday.app/monday/export_action`. Running it DMs the user a 15-minute CSV download link for their account's audit log. Requires `notifications:write` in addition to the scopes below.
 7. **Scopes:** `boards:read`, `boards:write` (add `notifications:write` for the export action).
 

@@ -174,7 +174,7 @@ async def health():
 
 
 # Automation Block action endpoint. Monday calls this when the automation's
-# trigger fires ("When an item is created, screen it..."). The board and the
+# trigger fires ("When button clicked, screen it..."). The board and the
 # columns are chosen by the CLIENT in the automation UI and arrive in the
 # payload — NOT from our .env — so it works on any client board.
 @app.post("/monday/execute_action")
@@ -211,9 +211,9 @@ async def execute_action(request: Request):
     # Per-account short-lived token from the JWT (dev: MONDAY_API_TOKEN)
     api_token = auth.get("shortLivedToken")
 
-    # Some triggers (e.g. "When button clicked") don't reliably pass boardId
-    # as a context variable the way "When item created" does. Fall back to
-    # resolving it from the item itself rather than failing the whole run.
+    # Our "When button clicked" trigger doesn't reliably pass boardId as a
+    # context variable (unlike "When item created"). Fall back to resolving
+    # it from the item itself rather than failing the whole run.
     if not board_id and item_id:
         try:
             board_id = await get_item_board_id(item_id, api_token)
